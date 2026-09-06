@@ -9,6 +9,9 @@ android {
     namespace = "com.fintrack.dndbeginnerremote"
     compileSdk = 35
 
+    // NDK r28+ aligns 64-bit .so files for 16 KB page-size devices by default
+    ndkVersion = "28.2.13676358"
+
     defaultConfig {
         applicationId = "com.fintrack.dndbeginnerremote"
         minSdk = 30
@@ -21,6 +24,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                // 16 KB page-size support (required on newer Android / Play)
+                arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             }
         }
     }
@@ -52,6 +57,8 @@ android {
     }
     packaging {
         jniLibs {
+            // Uncompressed + page-aligned native libs (needed for 16 KB devices)
+            useLegacyPackaging = false
             // Avoid duplicate native libs from Game Activity prefab
             pickFirsts += listOf("**/libc++_shared.so")
         }

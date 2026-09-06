@@ -17,6 +17,11 @@ add_library(dndbeginnerremote SHARED
         Game.cpp)
 
 # Searches for a package provided by the game activity dependency
+
+# Ensure 16 KB ELF segment alignment for arm64/x86_64 (Android 15+ / Play requirement)
+target_link_options(dndbeginnerremote PRIVATE
+        "-Wl,-z,max-page-size=16384")
+
 find_package(game-activity REQUIRED CONFIG)
 
 # Forces the linker to keep the JNI entry point for GameActivity
