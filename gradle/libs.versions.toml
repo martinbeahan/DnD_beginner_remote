@@ -1,14 +1,15 @@
 [versions]
-agp = "9.0.1"
+agp = "8.7.3"
+kotlin = "2.0.21"
 coreKtx = "1.15.0"
 junit = "4.13.2"
-junitVersion = "1.3.0"
-espressoCore = "3.7.0"
-appcompat = "1.6.1"
-material = "1.10.0"
+junitVersion = "1.2.1"
+espressoCore = "3.6.1"
+appcompat = "1.7.0"
+material = "1.12.0"
 gamesActivity = "4.0.0"
 googleServices = "4.4.2"
-firebaseBom = "33.1.2"
+firebaseBom = "33.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -23,4 +24,5 @@ firebase-database = { group = "com.google.firebase", name = "firebase-database" 
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

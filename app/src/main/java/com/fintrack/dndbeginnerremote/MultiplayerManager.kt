@@ -8,10 +8,11 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 
 class MultiplayerManager(private val sessionId: String) {
+    // Firebase is optional until google-services.json is added and the Google Services plugin is enabled.
     private var database: FirebaseDatabase? = try {
         FirebaseDatabase.getInstance()
     } catch (e: Exception) {
-        Log.e("Multiplayer", "Firebase not initialized: ${e.message}")
+        Log.w("Multiplayer", "Firebase unavailable (${e.message}). Continuing in local/single-player mode.")
         null
     }
     
