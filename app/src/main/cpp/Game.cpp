@@ -19,9 +19,9 @@ Game::Game() : currentTurnIndex_(0), turnCounter_(0), roomCount_(0), gameOver_(f
 }
 
 void Game::startNewGame(CharacterClass selectedClass, const std::string& playerName) {
+    turnOrder_.clear();
     players_.clear();
     enemies_.clear();
-    turnOrder_.clear();
     chatHistory_.clear();
     journalEntries_.clear();
     while(!visualEvents_.empty()) visualEvents_.pop();
@@ -111,7 +111,15 @@ void Game::rollInitiative() {
 }
 
 void Game::rebuildTurnOrder() {
-    std::string currentUid = (turnOrder_.empty() || currentTurnIndex_ < 0 || static_cast<size_t>(currentTurnIndex_) >= turnOrder_.size()) ? "" : turnOrder_[static_cast<size_t>(currentTurnIndex_)]->uid;
+    // Capture identity before we clear; never touch turnOrder_ after players_/enemies_ were freed.
+    const int savedIndex = currentTurnIndex_;
+    std::string currentUid;
+    if (!turnOrder_.empty()
+        && currentTurnIndex_ >= 0
+        && static_cast<size_t>(currentTurnIndex_) < turnOrder_.size()
+        && turnOrder_[static_cast<size_t>(currentTurnIndex_)] != nullptr) {
+        currentUid = turnOrder_[static_cast<size_t>(currentTurnIndex_)]->uid;
+    }
 
     turnOrder_.clear();
     for (auto& p : players_) turnOrder_.push_back(p.get());
@@ -129,7 +137,12 @@ void Game::rebuildTurnOrder() {
             }
         }
     }
-    currentTurnIndex_ = 0;
+    // After deserialize turnOrder_ was cleared first, so fall back to the saved index.
+    if (savedIndex >= 0 && static_cast<size_t>(savedIndex) < turnOrder_.size()) {
+        currentTurnIndex_ = savedIndex;
+    } else {
+        currentTurnIndex_ = 0;
+    }
 }
 
 Character* Game::findCharacter(const std::string& name) {
@@ -587,6 +600,10 @@ std::string Game::serialize() {
 
 void Game::deserialize(const std::string& data) {
     if (data.empty()) return;
+    // Drop turn pointers BEFORE destroying Character unique_ptrs (avoids use-after-free hangs).
+    turnOrder_.clear();
+    currentTurnIndex_ = 0;
+
     std::stringstream ss(data);
     std::string section;
 

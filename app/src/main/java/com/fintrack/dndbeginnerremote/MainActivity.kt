@@ -225,31 +225,51 @@ class MainActivity : GameActivity() {
         multiplayer = MultiplayerManager(id)
         multiplayer?.listenForUpdates(object : MultiplayerManager.StateUpdateListener {
             override fun onStateUpdated(data: String) {
-                if (data == saveGameState()) return
-                isUpdatingFromRemote = true
-                loadGameState(data)
-                
-                if (isNewPlayer && !getPlayerStatus().contains(localPlayerName)) {
-                    addRemoteAlly(selectedClass, localPlayerName)
-                    syncAndSave()
+                if (data.isBlank() || isUpdatingFromRemote) return
+                try {
+                    val local = saveGameState()
+                    if (data == local) return
+                    isUpdatingFromRemote = true
+                    loadGameState(data)
+                    if (isNewPlayer && !getPlayerStatus().contains(localPlayerName)) {
+                        addRemoteAlly(selectedClass, localPlayerName)
+                        syncAndSave()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "remote state apply failed", e)
+                } finally {
+                    isUpdatingFromRemote = false
                 }
-                isUpdatingFromRemote = false
             }
         })
-        multiplayer?.listenForChat { msg -> if (!getChatHistory().contains(msg)) sendChatMessage("Remote", msg) }
+        multiplayer?.listenForChat { msg ->
+            try {
+                if (!getChatHistory().contains(msg)) sendChatMessage("Remote", msg)
+            } catch (e: Exception) {
+                Log.w(TAG, "remote chat failed", e)
+            }
+        }
     }
 
     private fun syncAndSave() {
         if (!nativeReady) return
-        val data = saveGameState()
-        prefs().edit()
-            .putString("save_state", data)
-            .putString("hero_name", localPlayerName)
-            .putInt("hero_class", localClassId)
-            .apply()
-        if (!isUpdatingFromRemote) multiplayer?.updateState(data)
-        lastBattleRoster = "" // force sprite/HP refresh
-        refreshBattleArena()
+        try {
+            val data = saveGameState()
+            prefs().edit()
+                .putString("save_state", data)
+                .putString("hero_name", localPlayerName)
+                .putInt("hero_class", localClassId)
+                .apply()
+            if (!isUpdatingFromRemote) {
+                try { multiplayer?.updateState(data) } catch (e: Exception) {
+                    Log.w(TAG, "multiplayer update failed", e)
+                }
+            }
+            lastBattleRoster = "" // force sprite/HP refresh
+            refreshBattleArena()
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAndSave failed", e)
+        }
     }
 
     private fun savedState(): String? {
@@ -281,8 +301,8 @@ class MainActivity : GameActivity() {
         try {
             loadGameState(data)
             setHost(true)
-            val sid = try { getSessionId() } catch (_: Exception) { "" }
-            if (sid.isNotBlank()) setupMultiplayer(sid)
+            // Solo continue — don't attach Firebase. Hosting/joining still uses setupMultiplayer.
+            multiplayer = null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load save", e)
             Toast.makeText(this, "Save looked broken — start a new game.", Toast.LENGTH_LONG).show()
@@ -298,6 +318,13 @@ class MainActivity : GameActivity() {
         lastCoachTip = ""
         lastCoachTurnKey = ""
         val status = try { getPlayerStatus() } catch (_: Exception) { "" }
+        if (!status.contains(localPlayerName) && !status.contains("| HP:")) {
+            Toast.makeText(this, "Save looked empty — starting fresh is safer.", Toast.LENGTH_LONG).show()
+            prefs().edit().remove("save_state").apply()
+            sessionActive = false
+            showStartDialog()
+            return
+        }
         btnReset.visibility = if (status.contains("Game Over")) View.VISIBLE else View.GONE
         refreshBattleArena()
         updateUi()
