@@ -221,7 +221,6 @@ class MainActivity : GameActivity() {
         if (!isUpdatingFromRemote) multiplayer?.updateState(data)
         lastBattleRoster = "" // force sprite/HP refresh
         refreshBattleArena()
-        maybeSoloDmCoach(status, isShop)
     }
 
     private fun showStartDialog() {
