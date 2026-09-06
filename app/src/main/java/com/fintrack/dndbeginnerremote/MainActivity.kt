@@ -18,10 +18,10 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.appcompat.app.AlertDialog
-import com.google.androidgamesdk.GameActivity
+import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.FirebaseApp
 
-class MainActivity : GameActivity() {
+class MainActivity : AppCompatActivity() {
     private val TAG = "DnDMain"
 
     private lateinit var statusText: TextView
@@ -46,6 +46,22 @@ class MainActivity : GameActivity() {
     private var lastBattleRoster = ""
     private var lastAnimEvent = ""
     private val handler = Handler(Looper.getMainLooper())
+    private var uiLoopStarted = false
+    private val uiTick = object : Runnable {
+        override fun run() {
+            if (!sessionActive || !nativeReady) {
+                handler.postDelayed(this, 500)
+                return
+            }
+            try {
+                processGameTurn()
+                updateUi()
+            } catch (e: Exception) {
+                Log.e(TAG, "ui tick failed", e)
+            }
+            handler.postDelayed(this, 300)
+        }
+    }
     private var lastProcessedEvent = ""
     private var lastRoomDesc = ""
     private var lastChatHistory = ""
@@ -176,8 +192,27 @@ class MainActivity : GameActivity() {
         }
 
         soloCoachEnabled = prefs().getBoolean("solo_coach_enabled", true)
+
+        // If the last run died mid-frame, drop the save so Continue can't boot-loop a bad state.
+        if (prefs().getBoolean("crash_guard", false)) {
+            Log.w(TAG, "Previous run did not exit cleanly — clearing save_state")
+            prefs().edit()
+                .remove("save_state")
+                .putBoolean("crash_guard", false)
+                .apply()
+            Toast.makeText(this, "Cleared a broken save from a previous crash.", Toast.LENGTH_LONG).show()
+        } else {
+            prefs().edit().putBoolean("crash_guard", true).apply()
+        }
+
         showStartDialog()
         startUiUpdateLoop()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(uiTick)
+        uiLoopStarted = false
+        super.onDestroy()
     }
 
     override fun onPause() {
@@ -259,6 +294,7 @@ class MainActivity : GameActivity() {
                 .putString("save_state", data)
                 .putString("hero_name", localPlayerName)
                 .putInt("hero_class", localClassId)
+                .putBoolean("crash_guard", false)
                 .apply()
             if (!isUpdatingFromRemote) {
                 try { multiplayer?.updateState(data) } catch (e: Exception) {
@@ -384,7 +420,7 @@ class MainActivity : GameActivity() {
             if (isNewGame) {
                 resetGame(which, localPlayerName)
                 setHost(true)
-                setupMultiplayer(getSessionId())
+                multiplayer = null // solo by default; Join Session wires Firebase
                 maybeOfferTutorialThenCoach()
             } else {
                 setHost(false)
@@ -482,13 +518,9 @@ class MainActivity : GameActivity() {
     }
 
     private fun startUiUpdateLoop() {
-        handler.post(object : Runnable {
-            override fun run() {
-                processGameTurn()
-                updateUi()
-                handler.postDelayed(this, 300)
-            }
-        })
+        if (uiLoopStarted) return
+        uiLoopStarted = true
+        handler.post(uiTick)
     }
 
 
