@@ -15,8 +15,10 @@ struct android_app;
 struct AnimationState {
     float xOffset = 0.0f;
     float yOffset = 0.0f;
+    float scaleBoost = 0.0f;
     float flashIntensity = 0.0f;
     int framesRemaining = 0;
+    int framesTotal = 0;
 };
 
 class Renderer {

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
 
     <!-- Top Status Bar -->
     <LinearLayout
@@ -9,8 +10,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="16dp"
-        android:background="#80000000"
+        android:padding="12dp"
+        android:background="#CC101820"
         android:layout_alignParentTop="true"
         android:gravity="center_vertical">
 
@@ -21,8 +22,9 @@
             android:layout_weight="1"
             android:text="Loading Party..."
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:maxLines="6" />
 
         <Button
             android:id="@+id/btnJournal"
@@ -43,17 +45,26 @@
             android:textSize="12sp"/>
     </LinearLayout>
 
-    <!-- Room Description -->
+    <!-- Transparent hole so the native battle renderer is visible -->
+    <FrameLayout
+        android:id="@+id/battleArena"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/topBar"
+        android:layout_above="@id/bottomControls"
+        android:background="@android:color/transparent" />
+
+    <!-- Room Description overlays the top of the battle area -->
     <TextView
         android:id="@+id/roomDescText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/topBar"
-        android:background="#60000000"
-        android:padding="12dp"
+        android:background="#99000000"
+        android:padding="10dp"
         android:text="Room description..."
         android:textColor="#E0E0E0"
-        android:textSize="15sp"
+        android:textSize="14sp"
         android:fontFamily="serif"
         android:textStyle="italic" />
 
@@ -63,14 +74,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:background="#E0101820">
 
-        <!-- Action Buttons -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:background="#90000000"
             android:padding="4dp"
             android:gravity="center">
 
@@ -128,12 +138,10 @@
                 android:visibility="gone" />
         </LinearLayout>
 
-        <!-- Chat Input -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:background="#A0000000"
             android:padding="4dp">
             <EditText
                 android:id="@+id/chatInput"
@@ -154,11 +162,9 @@
                 android:textColor="#FFD700"/>
         </LinearLayout>
 
-        <!-- Combat/Chat Log -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:background="#B0000000"
+            android:layout_height="100dp"
             android:orientation="vertical"
             android:padding="8dp">
 
@@ -167,7 +173,7 @@
                 android:layout_height="wrap_content"
                 android:text="Journal &amp; Chat"
                 android:textColor="#FFD700"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="italic" />
 
             <ScrollView
@@ -180,7 +186,7 @@
                     android:layout_height="wrap_content"
                     android:text="Welcome! Your turn."
                     android:textColor="#FFFFFF"
-                    android:textSize="15sp" />
+                    android:textSize="14sp" />
             </ScrollView>
         </LinearLayout>
     </LinearLayout>

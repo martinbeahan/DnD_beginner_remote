@@ -6,6 +6,8 @@
 #include <vector>
 #include <android/imagedecoder.h>
 #include <cmath>
+#include <string>
+#include <cctype>
 
 #include "AndroidOut.h"
 #include "Shader.h"
@@ -13,7 +15,7 @@
 #include "TextureAsset.h"
 #include "GameLogic.h"
 
-#define CORNFLOWER_BLUE 100 / 255.f, 149 / 255.f, 237 / 255.f, 1
+#define DUNGEON_BG 18 / 255.f, 24 / 255.f, 36 / 255.f, 1
 
 static const char *vertex = R"vertex(#version 300 es
 in vec3 inPosition;
@@ -76,6 +78,25 @@ Renderer::~Renderer() {
     }
 }
 
+
+static int modelIndexForPlayer(dnd::CharacterClass c) {
+    switch (c) {
+        case dnd::CharacterClass::FIGHTER: return 0;
+        case dnd::CharacterClass::WIZARD:  return 1;
+        case dnd::CharacterClass::ROGUE:   return 2;
+        case dnd::CharacterClass::CLERIC:  return 3;
+    }
+    return 6;
+}
+
+static int modelIndexForEnemy(const std::string& name) {
+    std::string lower = name;
+    for (char& ch : lower) ch = (char)tolower((unsigned char)ch);
+    if (lower.find("skeleton") != std::string::npos) return 5;
+    if (lower.find("goblin") != std::string::npos) return 4;
+    return 4;
+}
+
 void Renderer::updateAnimations() {
     while (game_.hasVisualEvent()) {
         dnd::VisualEvent ev = game_.popVisualEvent();
@@ -85,15 +106,28 @@ void Renderer::updateAnimations() {
 
     auto updateMap = [](std::map<int, AnimationState>& anims) {
         for (auto it = anims.begin(); it != anims.end(); ) {
-            if (it->second.framesRemaining > 0) {
-                it->second.framesRemaining--;
-                if (it->second.framesRemaining == 0) {
-                    it->second.xOffset = 0;
-                    it->second.flashIntensity = 0;
-                } else {
-                    it->second.flashIntensity *= 0.85f;
-                    if (it->second.flashIntensity > 0) it->second.xOffset = (rand() % 10 - 5) * 0.015f;
+            AnimationState& s = it->second;
+            if (s.framesRemaining > 0) {
+                s.framesRemaining--;
+                float t = (s.framesTotal > 0)
+                    ? (1.0f - (float)s.framesRemaining / (float)s.framesTotal)
+                    : 1.0f;
+                // Ease attack lunge back to rest
+                s.xOffset *= 0.82f;
+                s.yOffset *= 0.82f;
+                s.scaleBoost *= 0.88f;
+                if (s.flashIntensity > 0.01f) {
+                    s.flashIntensity *= 0.88f;
+                    // Hit shake
+                    s.xOffset += ((rand() % 11) - 5) * 0.012f;
                 }
+                if (s.framesRemaining == 0) {
+                    s.xOffset = 0;
+                    s.yOffset = 0;
+                    s.scaleBoost = 0;
+                    s.flashIntensity = 0;
+                }
+                (void)t;
                 ++it;
             } else {
                 it = anims.erase(it);
@@ -107,12 +141,18 @@ void Renderer::updateAnimations() {
 void Renderer::triggerAnim(bool isPlayer, int index, dnd::VisualEventType type) {
     AnimationState& state = isPlayer ? playerAnims_[index] : enemyAnims_[index];
     if (type == dnd::VisualEventType::PLAYER_ATTACK || type == dnd::VisualEventType::ENEMY_ATTACK) {
-        state.framesRemaining = 12;
-        state.xOffset = isPlayer ? 0.4f : -0.4f;
-        state.flashIntensity = 0;
+        state.framesTotal = 18;
+        state.framesRemaining = 18;
+        state.xOffset = isPlayer ? 0.65f : -0.65f;
+        state.yOffset = 0.12f;
+        state.scaleBoost = 0.35f;
+        state.flashIntensity = 0.15f;
     } else {
-        state.framesRemaining = 15;
+        state.framesTotal = 20;
+        state.framesRemaining = 20;
         state.flashIntensity = 1.0f;
+        state.scaleBoost = 0.2f;
+        state.xOffset = isPlayer ? -0.08f : 0.08f;
     }
 }
 
@@ -147,12 +187,13 @@ void Renderer::render() {
             glUniform1i(uUseTexture, 0);
             glUniform3f(uScale, 0.4f, 0.05f, 1.0f);
 
-            glUniform3f(uOffset, x, y + 0.5f, 0.0f);
-            glUniform3f(uTint, 0.2f, 0.0f, 0.0f);
+            glUniform3f(uOffset, x, y + 0.72f, 0.0f);
+            glUniform3f(uTint, 0.25f, 0.05f, 0.05f);
             shader_->drawModel(models_[0]);
 
             glUniform3f(uScale, 0.4f * healthPerc, 0.05f, 1.0f);
-            glUniform3f(uOffset, x - (0.4f * (1.0f - healthPerc)), y + 0.5f, 0.0f);
+            // Keep left-aligned fill as HP drops
+            glUniform3f(uOffset, x - (0.4f * (1.0f - healthPerc) * 0.5f), y + 0.72f, 0.0f);
             glUniform3f(uTint, 0.2f, 1.0f, 0.2f);
             shader_->drawModel(models_[0]);
 
@@ -163,55 +204,53 @@ void Renderer::render() {
         dnd::Character* activeActor = game_.getCurrentActor();
 
         const auto& players = game_.getPlayers();
-        float pyStart = (players.size() - 1) * 0.6f;
+        float pyStart = (players.empty() ? 0.0f : (players.size() - 1) * 0.55f);
         for (size_t i = 0; i < players.size(); ++i) {
-            float animX = playerAnims_[(int)i].xOffset;
-            float flash = playerAnims_[(int)i].flashIntensity;
-            float xPos = -1.2f + animX;
-            float yPos = pyStart - (i * 1.2f);
+            const AnimationState& anim = playerAnims_[(int)i];
+            float idleBob = 0.03f * sinf(totalTime_ * 3.0f + (float)i);
+            float xPos = -1.35f + anim.xOffset;
+            float yPos = pyStart - (i * 1.05f) + anim.yOffset + idleBob;
 
-            float pulse = 1.0f;
+            float pulse = 1.0f + anim.scaleBoost;
             if (activeActor == players[i].get()) {
-                pulse = 1.15f + 0.15f * sinf(totalTime_ * 10.0f);
+                pulse += 0.08f + 0.08f * sinf(totalTime_ * 8.0f);
             }
 
             glUniform3f(uOffset, xPos, yPos, 0.0f);
             glUniform3f(uScale, pulse, pulse, 1.0f);
+            glUniform3f(uTint, 1.0f, 1.0f, 1.0f);
+            glUniform1f(uFlash, anim.flashIntensity);
 
-            switch(players[i]->characterClass) {
-                case dnd::CharacterClass::FIGHTER: glUniform3f(uTint, 0.4f, 0.6f, 1.0f); break;
-                case dnd::CharacterClass::WIZARD:  glUniform3f(uTint, 0.7f, 0.3f, 1.0f); break;
-                case dnd::CharacterClass::ROGUE:   glUniform3f(uTint, 1.0f, 0.9f, 0.3f); break;
-                case dnd::CharacterClass::CLERIC:  glUniform3f(uTint, 1.0f, 1.0f, 1.0f); break;
-            }
-            glUniform1f(uFlash, flash);
-
-            glUniform1i(uUseTexture, models_[0].hasTexture() ? 1 : 0);
-            shader_->drawModel(models_[0]);
+            int mi = modelIndexForPlayer(players[i]->characterClass);
+            if (mi < 0 || mi >= (int)models_.size()) mi = (int)models_.size() - 1;
+            glUniform1i(uUseTexture, models_[mi].hasTexture() ? 1 : 0);
+            shader_->drawModel(models_[mi]);
 
             drawHealthBar(xPos, yPos, (float)players[i]->currentHp / (float)std::max(1, players[i]->maxHp));
         }
 
         const auto& enemies = game_.getEnemies();
-        float eyStart = (enemies.size() - 1) * 0.6f;
+        float eyStart = (enemies.empty() ? 0.0f : (enemies.size() - 1) * 0.55f);
         for (size_t i = 0; i < enemies.size(); ++i) {
-            float animX = enemyAnims_[(int)i].xOffset;
-            float flash = enemyAnims_[(int)i].flashIntensity;
-            float xPos = 1.2f + animX;
-            float yPos = eyStart - (i * 1.2f);
+            const AnimationState& anim = enemyAnims_[(int)i];
+            float idleBob = 0.03f * sinf(totalTime_ * 3.2f + (float)i + 1.0f);
+            float xPos = 1.35f + anim.xOffset;
+            float yPos = eyStart - (i * 1.05f) + anim.yOffset + idleBob;
 
-            float pulse = 1.0f;
+            float pulse = 1.0f + anim.scaleBoost;
             if (activeActor == enemies[i].get()) {
-                pulse = 1.15f + 0.15f * sinf(totalTime_ * 10.0f);
+                pulse += 0.08f + 0.08f * sinf(totalTime_ * 8.0f);
             }
 
             glUniform3f(uOffset, xPos, yPos, 0.0f);
-            glUniform3f(uScale, pulse, pulse, 1.0f);
-            glUniform3f(uTint, 1.0f, 0.2f, 0.2f);
-            glUniform1f(uFlash, flash);
+            glUniform3f(uScale, pulse * 0.95f, pulse * 0.95f, 1.0f);
+            glUniform3f(uTint, 1.0f, 1.0f, 1.0f);
+            glUniform1f(uFlash, anim.flashIntensity);
 
-            glUniform1i(uUseTexture, models_[0].hasTexture() ? 1 : 0);
-            shader_->drawModel(models_[0]);
+            int mi = modelIndexForEnemy(enemies[i]->name);
+            if (mi < 0 || mi >= (int)models_.size()) mi = (int)models_.size() - 1;
+            glUniform1i(uUseTexture, models_[mi].hasTexture() ? 1 : 0);
+            shader_->drawModel(models_[mi]);
 
             drawHealthBar(xPos, yPos, (float)enemies[i]->currentHp / (float)std::max(1, enemies[i]->maxHp));
         }
@@ -274,7 +313,7 @@ void Renderer::initRenderer() {
     assert(shader_);
     shader_->activate();
 
-    glClearColor(CORNFLOWER_BLUE);
+    glClearColor(DUNGEON_BG);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -295,18 +334,28 @@ void Renderer::updateRenderArea() {
 }
 
 void Renderer::createModels() {
+    // Slightly taller quad for character sprites
     std::vector<Vertex> vertices = {
-            Vertex(Vector3{0.35f, 0.35f, 0}, Vector2{0, 0}),
-            Vertex(Vector3{-0.35f, 0.35f, 0}, Vector2{1, 0}),
-            Vertex(Vector3{-0.35f, -0.35f, 0}, Vector2{1, 1}),
-            Vertex(Vector3{0.35f, -0.35f, 0}, Vector2{0, 1})
+            Vertex(Vector3{0.45f, 0.55f, 0}, Vector2{0, 0}),
+            Vertex(Vector3{-0.45f, 0.55f, 0}, Vector2{1, 0}),
+            Vertex(Vector3{-0.45f, -0.55f, 0}, Vector2{1, 1}),
+            Vertex(Vector3{0.45f, -0.55f, 0}, Vector2{0, 1})
     };
     std::vector<Index> indices = {0, 1, 2, 0, 2, 3};
 
     auto assetManager = app_->activity->assetManager;
-    auto spAndroidRobotTexture = TextureAsset::loadAsset(assetManager, "android_robot.png");
-    models_.emplace_back(vertices, indices, spAndroidRobotTexture);
+    // Order must match modelIndexFor*() helpers below:
+    // 0 fighter, 1 wizard, 2 rogue, 3 cleric, 4 goblin, 5 skeleton, 6 fallback
+    const char* files[] = {
+        "fighter.png", "wizard.png", "rogue.png", "cleric.png",
+        "goblin.png", "skeleton.png", "android_robot.png"
+    };
+    for (const char* file : files) {
+        auto tex = TextureAsset::loadAsset(assetManager, file);
+        models_.emplace_back(vertices, indices, tex);
+    }
 }
+
 
 void Renderer::handleInput() {
     auto *inputBuffer = android_app_swap_input_buffers(app_);
