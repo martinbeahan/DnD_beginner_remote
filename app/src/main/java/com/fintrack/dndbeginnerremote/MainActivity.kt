@@ -55,6 +55,8 @@ class MainActivity : GameActivity() {
     private var lastCoachTip = ""
     private var lastCoachTurnKey = ""
     private var soloCoachEnabled = true
+    /** True after Continue / New Game / Join — avoids wiping save in onPause before that. */
+    private var sessionActive = false
 
     companion object {
         private const val NATIVE_LIB = "dndbeginnerremote"
@@ -178,6 +180,25 @@ class MainActivity : GameActivity() {
         startUiUpdateLoop()
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Flush save before process death so progress survives relaunch.
+        // Skip until a session is active so the start dialog can't overwrite a good save with an empty game.
+        if (!nativeReady || !sessionActive) return
+        try {
+            val data = saveGameState()
+            if (data.isNotBlank() && data.contains("|")) {
+                prefs().edit()
+                    .putString("save_state", data)
+                    .putString("hero_name", localPlayerName)
+                    .putInt("hero_class", localClassId)
+                    .commit()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "onPause save failed", e)
+        }
+    }
+
     private fun handleActionWithTarget(title: String, isEnemy: Boolean = true, action: (Int) -> Unit) {
         val status = getPlayerStatus()
         Log.d(TAG, "Targeting for $title. Status: $status")
@@ -219,11 +240,68 @@ class MainActivity : GameActivity() {
     }
 
     private fun syncAndSave() {
+        if (!nativeReady) return
         val data = saveGameState()
-        getPreferences(MODE_PRIVATE).edit().putString("save_state", data).apply()
+        prefs().edit()
+            .putString("save_state", data)
+            .putString("hero_name", localPlayerName)
+            .putInt("hero_class", localClassId)
+            .apply()
         if (!isUpdatingFromRemote) multiplayer?.updateState(data)
         lastBattleRoster = "" // force sprite/HP refresh
         refreshBattleArena()
+    }
+
+    private fun savedState(): String? {
+        val data = prefs().getString("save_state", null)
+        return data?.takeIf { it.isNotBlank() && it.contains("|") }
+    }
+
+    private fun heroNameFromSave(data: String): String {
+        val stored = prefs().getString("hero_name", null)?.trim().orEmpty()
+        if (stored.isNotEmpty()) return stored
+        val parts = data.split('|')
+        if (parts.size < 3) return "Hero"
+        val name = parts[2].substringBefore(';').substringBefore(',').trim()
+        return name.ifEmpty { "Hero" }
+    }
+
+    private fun continueSavedGame() {
+        if (!nativeReady) {
+            Toast.makeText(this, "Native library not ready — can't load save.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val data = savedState() ?: run {
+            Toast.makeText(this, "No save found.", Toast.LENGTH_SHORT).show()
+            showStartDialog()
+            return
+        }
+        localPlayerName = heroNameFromSave(data)
+        localClassId = prefs().getInt("hero_class", 0)
+        try {
+            loadGameState(data)
+            setHost(true)
+            val sid = try { getSessionId() } catch (_: Exception) { "" }
+            if (sid.isNotBlank()) setupMultiplayer(sid)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load save", e)
+            Toast.makeText(this, "Save looked broken — start a new game.", Toast.LENGTH_LONG).show()
+            prefs().edit().remove("save_state").apply()
+            showStartDialog()
+            return
+        }
+        sessionActive = true
+        lastBattleRoster = ""
+        lastRoomDesc = ""
+        lastChatHistory = ""
+        lastProcessedEvent = ""
+        lastCoachTip = ""
+        lastCoachTurnKey = ""
+        val status = try { getPlayerStatus() } catch (_: Exception) { "" }
+        btnReset.visibility = if (status.contains("Game Over")) View.VISIBLE else View.GONE
+        refreshBattleArena()
+        updateUi()
+        Toast.makeText(this, "Welcome back, $localPlayerName", Toast.LENGTH_SHORT).show()
     }
 
     private fun showStartDialog() {
@@ -232,22 +310,43 @@ class MainActivity : GameActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(60, 40, 60, 10)
         }
-        val nameInput = EditText(this).apply { hint = "Enter Hero Name" }
+        val saved = savedState()
+        val defaultName = saved?.let { heroNameFromSave(it) } ?: prefs().getString("hero_name", null)
+        val nameInput = EditText(this).apply {
+            hint = "Enter Hero Name"
+            if (!defaultName.isNullOrBlank()) setText(defaultName)
+        }
         layout.addView(nameInput)
 
-        AlertDialog.Builder(this)
+        val builder = AlertDialog.Builder(this)
             .setTitle("D&D Remote Multiplayer")
             .setView(layout)
             .setCancelable(false)
-            .setPositiveButton("New Game") { _, _ ->
+
+        if (saved != null) {
+            builder.setMessage("A saved adventure was found for ${heroNameFromSave(saved)}.")
+            builder.setPositiveButton("Continue") { _, _ ->
+                continueSavedGame()
+            }
+            builder.setNeutralButton("New Game") { _, _ ->
                 localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
                 showClassSelection(isNewGame = true)
             }
-            .setNegativeButton("Join Session") { _, _ ->
+            builder.setNegativeButton("Join Session") { _, _ ->
                 localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
                 showJoinDialog()
             }
-            .show()
+        } else {
+            builder.setPositiveButton("New Game") { _, _ ->
+                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
+                showClassSelection(isNewGame = true)
+            }
+            builder.setNegativeButton("Join Session") { _, _ ->
+                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
+                showJoinDialog()
+            }
+        }
+        builder.show()
     }
 
     private fun showClassSelection(isNewGame: Boolean, sid: String = "") {
@@ -264,6 +363,7 @@ class MainActivity : GameActivity() {
                 setHost(false)
                 setupMultiplayer(sid, isNewPlayer = true, selectedClass = which)
             }
+            sessionActive = true
             btnReset.visibility = View.GONE
             syncAndSave()
             updateUi()
