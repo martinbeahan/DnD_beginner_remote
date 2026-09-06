@@ -268,6 +268,40 @@ class MainActivity : GameActivity() {
         }.show()
     }
 
+
+    private fun showShopDialog() {
+        if (!nativeReady) {
+            Toast.makeText(this, "Native library not loaded — cannot open shop.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val manifest = getShopManifest()
+        if (manifest.isBlank()) {
+            Toast.makeText(this, "The merchant has nothing for sale.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // C++ format: "0:Steel Blade (25g);1:Platemail (25g);..."
+        val entries = manifest.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "The merchant has nothing for sale.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = entries.map { entry ->
+            val parts = entry.split(':', limit = 2)
+            if (parts.size == 2) parts[1] else entry
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Merchant")
+            .setItems(labels) { _, which ->
+                val entry = entries[which]
+                val index = entry.substringBefore(':').toIntOrNull() ?: which
+                doBuyItem(localPlayerName, index)
+                syncAndSave()
+                Toast.makeText(this, "Bought ${labels[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Leave", null)
+            .show()
+    }
+
     private fun showJournal() = AlertDialog.Builder(this).setTitle("Journal").setMessage(getJournal()).setPositiveButton("Close", null).show()
 
     private fun startUiUpdateLoop() {
