@@ -337,6 +337,8 @@ class MainActivity : GameActivity() {
         statusText.text = status
         btnSpecial.text = if (isShop) "Status" else getSpecialName()
         btnAttack.text = if (isShop) "Shop" else "Attack"
+        btnHeal.text = "Potion"
+        if (!isShop) btnRest.text = "Short Rest" else btnRest.text = "Leave"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
 
         val isMyTurn = isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")

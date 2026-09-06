@@ -40,6 +40,8 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     lastEvent_ = "Adventure Started! Room 1. Roll for Initiative!";
     addChatMessage("System", "A new party has entered the dungeon.");
     addJournalEntry("The party entered the dungeon.");
+    dmSay("Welcome, adventurers. I am your Dungeon Master. Steel yourselves — danger waits in the dark.");
+    dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, and Short Rest to recover.");
 }
 
 void Game::addAlly(const std::string& name, CharacterClass cl) {
@@ -58,6 +60,7 @@ void Game::generateRoomDescription() {
     ss << "You stand in a " << adjectives[static_cast<size_t>(getRandomInt(0, static_cast<int>(adjectives.size()) - 1))]
        << " " << rooms[static_cast<size_t>(getRandomInt(0, static_cast<int>(rooms.size()) - 1))] << ". ";
     roomDescription_ = ss.str();
+    dmSay("Room " + std::to_string(roomCount_) + ": " + roomDescription_ + "What do you do?");
 }
 
 void Game::spawnRoomContent() {
@@ -68,6 +71,7 @@ void Game::spawnRoomContent() {
     if (roomCount_ > 1 && roomCount_ % 4 == 0) {
         isMerchantRoom_ = true;
         roomDescription_ = "You find a rare pocket of safety. A weary Merchant awaits.";
+        dmSay("A lantern glows ahead. A traveling merchant offers goods — and a chance for a longer rest from the grind.");
         shopInventory_.push_back(std::make_shared<Item>(Item{"Steel Blade", ItemType::WEAPON, (roomCount_ / 4)}));
         shopInventory_.push_back(std::make_shared<Item>(Item{"Platemail", ItemType::ARMOR, (roomCount_ / 4)}));
         shopInventory_.push_back(std::make_shared<Item>(Item{"Greater Potion", ItemType::POTION, 10}));
@@ -204,97 +208,82 @@ void Game::processTurn() {
     }
 }
 
-void Game::playerAttack(int targetEnemyIndex) {
-    if (gameOver_ || enemies_.empty() || targetEnemyIndex < 0 || static_cast<size_t>(targetEnemyIndex) >= enemies_.size()) return;
-    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->isDowned) return;
 
-    Character& enemy = *enemies_[static_cast<size_t>(targetEnemyIndex)];
-    int playerIdx = 0;
-    for(size_t i=0; i<players_.size(); ++i) if(players_[i].get() == actor) playerIdx = static_cast<int>(i);
-    pushVisualEvent(VisualEventType::PLAYER_ATTACK, playerIdx);
+void Game::dmSay(const std::string& line) {
+    addChatMessage("DM", line);
+}
+
+int Game::proficiencyBonus() const {
+    int level = players_.empty() ? 1 : players_[0]->level;
+    return dnd::CombatSystem::proficiencyBonusForLevel(level);
+}
+
+bool Game::performWeaponAttack(Character* actor, Character& target, int atkVisIndex, bool targetIsEnemy, int targetIndex, bool sneakAttack) {
+    if (!actor) return false;
+    pushVisualEvent(targetIsEnemy ? VisualEventType::PLAYER_ATTACK : VisualEventType::ENEMY_ATTACK, atkVisIndex);
 
     RollResult result = CombatSystem::performAttackRoll(*actor);
     int mod = CombatSystem::getPrimaryModifier(*actor);
+    int pb = CombatSystem::proficiencyBonusForLevel(actor->level);
     int gearBonus = actor->equippedWeapon ? actor->equippedWeapon->bonus : 0;
 
     std::stringstream ss;
-    ss << actor->name << " attacks! Roll: " << result.dieRoll << " + " << mod << "(stat) + " << gearBonus << "(gear) = " << result.total << ". ";
+    ss << actor->name << " attacks " << target.name << "! d20=" << result.dieRoll
+       << " + " << mod << " (ability) + " << pb << " (prof) + " << gearBonus
+       << " (magic) = " << result.total << " vs AC " << target.armorClass << ". ";
 
-    if (result.total >= enemy.armorClass) {
-        int dmg = CombatSystem::calculateDamage(*actor, result.isCriticalHit);
-        enemy.takeDamage(dmg);
-        pushVisualEvent(VisualEventType::ENEMY_DAMAGE, targetEnemyIndex);
-        ss << "HIT! Dealt " << dmg << " damage!";
-        if (result.isCriticalHit) addChatMessage("Combat", actor->name + " land a CRITICAL hit!");
+    bool hit = result.total >= target.armorClass || result.isCriticalHit;
+    if (result.isCriticalFail) hit = false;
+
+    if (hit) {
+        int extraDice = sneakAttack ? actor->sneakAttackDice() : 0;
+        int dmg = CombatSystem::calculateDamage(*actor, result.isCriticalHit, extraDice, 6);
+        target.takeDamage(dmg);
+        pushVisualEvent(targetIsEnemy ? VisualEventType::ENEMY_DAMAGE : VisualEventType::PLAYER_DAMAGE, targetIndex);
+        ss << (result.isCriticalHit ? "CRITICAL HIT! " : "Hit! ") << "Damage " << dmg;
+        if (sneakAttack) ss << " (includes Sneak Attack)";
+        ss << ".";
+        if (result.isCriticalHit) dmSay("The strike lands true — a critical hit!");
     } else {
-        ss << "MISS! (Enemy AC is " << enemy.armorClass << ")";
-        if (result.isCriticalFail) addChatMessage("Combat", actor->name + " fumbled horribly!");
+        ss << "Miss!";
+        if (result.isCriticalFail) {
+            ss << " (natural 1)";
+            dmSay(actor->name + " swings wildly and nearly drops their weapon.");
+        }
     }
     lastEvent_ = ss.str();
+    addChatMessage("Combat", lastEvent_);
+    return hit && target.currentHp <= 0;
+}
 
-    if (enemy.currentHp <= 0) {
-        addJournalEntry("Defeated " + enemy.name);
-        enemies_.erase(enemies_.begin() + targetEnemyIndex);
-        if (enemies_.empty()) {
-            int xpGained = 40 + (roomCount_ * 10);
-            for (auto& p : players_) p->addXp(xpGained);
-            roomCount_++;
+void Game::resolveEnemyDefeated(Character* actor, int /*targetEnemyIndex*/) {
+    // Remove dead enemies and advance dungeon
+    for (auto it = enemies_.begin(); it != enemies_.end(); ) {
+        if ((*it)->currentHp <= 0) {
+            addJournalEntry("Defeated " + (*it)->name);
+            dmSay("The " + (*it)->name + " falls. The dungeon grows quieter… for now.");
+            it = enemies_.erase(it);
+        } else ++it;
+    }
+
+    if (enemies_.empty()) {
+        int xpGained = 50 + (roomCount_ * 15);
+        for (auto& p : players_) {
+            if (p->addXp(xpGained)) {
+                dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
+            }
+        }
+        dmSay("The party gains " + std::to_string(xpGained) + " XP.");
+        roomCount_++;
+        if (actor) {
             auto loot = LootSystem::generateLoot(roomCount_);
             if (loot) {
                 if (loot->type == ItemType::WEAPON) actor->equippedWeapon = loot;
                 else if (loot->type == ItemType::ARMOR) { actor->equippedArmor = loot; actor->calculateAC(); }
+                dmSay(actor->name + " finds " + loot->getDescription() + " among the spoils.");
                 addJournalEntry(actor->name + " found loot: " + loot->getDescription());
             }
-            spawnRoomContent();
-            generateRoomDescription();
-            rollInitiative();
-        } else {
-            rebuildTurnOrder();
         }
-    } else {
-        currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
-    }
-}
-
-void Game::playerHeal(int targetPlayerIndex) {
-    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->resources <= 0 || targetPlayerIndex < 0 || static_cast<size_t>(targetPlayerIndex) >= players_.size()) return;
-
-    actor->resources--;
-    int amount = getRandomInt(4, 11);
-    players_[static_cast<size_t>(targetPlayerIndex)]->heal(amount);
-    lastEvent_ = actor->name + " heals " + players_[static_cast<size_t>(targetPlayerIndex)]->name + " for " + std::to_string(amount) + " HP.";
-    currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
-}
-
-void Game::playerSpecialAction(int targetEnemyIndex) {
-    if (gameOver_ || turnOrder_.empty()) return;
-    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->resources <= 0 || enemies_.empty() || targetEnemyIndex < 0 || static_cast<size_t>(targetEnemyIndex) >= enemies_.size()) return;
-
-    actor->resources--;
-    std::stringstream ss;
-    ss << actor->name << " uses " << actor->getSpecialAbilityName() << "! ";
-
-    if (actor->characterClass == CharacterClass::WIZARD) {
-        for (auto& e : enemies_) { e->takeDamage(getRandomInt(4, 13)); pushVisualEvent(VisualEventType::ENEMY_DAMAGE, 0); }
-        ss << "Fire engulfs the room!";
-    } else {
-        int dmg = CombatSystem::calculateDamage(*actor, true) + 8;
-        enemies_[static_cast<size_t>(targetEnemyIndex)]->takeDamage(dmg);
-        pushVisualEvent(VisualEventType::ENEMY_DAMAGE, targetEnemyIndex);
-        ss << "A massive strike deals " << dmg << " damage!";
-    }
-    lastEvent_ = ss.str();
-
-    for (auto it = enemies_.begin(); it != enemies_.end(); ) {
-        if ((*it)->currentHp <= 0) it = enemies_.erase(it);
-        else ++it;
-    }
-
-    if (enemies_.empty()) {
-        roomCount_++;
         spawnRoomContent();
         generateRoomDescription();
         rollInitiative();
@@ -303,15 +292,147 @@ void Game::playerSpecialAction(int targetEnemyIndex) {
     }
 }
 
-void Game::playerRest() {
-    if (isMerchantRoom_) {
-        roomCount_++; spawnRoomContent(); generateRoomDescription(); rollInitiative();
-        lastEvent_ = "You bid the merchant farewell.";
+void Game::playerAttack(int targetEnemyIndex) {
+    if (gameOver_ || enemies_.empty() || targetEnemyIndex < 0 || static_cast<size_t>(targetEnemyIndex) >= enemies_.size()) return;
+    if (turnOrder_.empty()) return;
+    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    if (!actor || actor->isDowned) return;
+
+    // Only player-controlled creatures use this button path
+    bool isPlayer = false;
+    int playerIdx = 0;
+    for (size_t i = 0; i < players_.size(); ++i) {
+        if (players_[i].get() == actor) { isPlayer = true; playerIdx = static_cast<int>(i); break; }
+    }
+    if (!isPlayer) return;
+
+    Character& enemy = *enemies_[static_cast<size_t>(targetEnemyIndex)];
+    bool killed = performWeaponAttack(actor, enemy, playerIdx, true, targetEnemyIndex, false);
+    if (killed || enemy.currentHp <= 0) {
+        resolveEnemyDefeated(actor, targetEnemyIndex);
+    } else {
+        currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+    }
+}
+
+void Game::playerHeal(int targetPlayerIndex) {
+    // Potion of Healing (SRD): 2d4+2. Anyone can drink one by spending a resource (supply).
+    if (turnOrder_.empty()) return;
+    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    if (!actor || actor->resources <= 0 || targetPlayerIndex < 0 || static_cast<size_t>(targetPlayerIndex) >= players_.size()) {
+        lastEvent_ = "No potions left (need a resource/supply).";
         return;
     }
-    for (auto& p : players_) { p->resources = p->maxResources; p->heal(p->maxHp / 2); p->isDowned = false; }
-    lastEvent_ = "Long Rest complete! Health and Power restored.";
-    addJournalEntry("The party took a long rest.");
+
+    actor->resources--;
+    Character& target = *players_[static_cast<size_t>(targetPlayerIndex)];
+    int amount = getRandomInt(1, 4) + getRandomInt(1, 4) + 2;
+    target.heal(amount);
+    lastEvent_ = actor->name + " drinks a Potion of Healing on " + target.name + " for " + std::to_string(amount) + " HP.";
+    dmSay(target.name + " feels vitality return as the potion takes hold.");
+    addChatMessage("Combat", lastEvent_);
+    currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+}
+
+void Game::playerSpecialAction(int targetEnemyIndex) {
+    if (gameOver_ || turnOrder_.empty()) return;
+    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    if (!actor || actor->isDowned) return;
+
+    int playerIdx = 0;
+    for (size_t i = 0; i < players_.size(); ++i) if (players_[i].get() == actor) playerIdx = static_cast<int>(i);
+
+    // Cleric Healing Word can target allies without an enemy
+    if (actor->characterClass == CharacterClass::CLERIC) {
+        if (actor->resources <= 0) { lastEvent_ = "No spell slots left."; return; }
+        actor->resources--;
+        int targetIdx = targetEnemyIndex; // UI reuses index picker for allies on heal; for special we heal lowest HP ally
+        int best = 0;
+        for (size_t i = 0; i < players_.size(); ++i) {
+            if (players_[i]->currentHp < players_[best]->currentHp) best = static_cast<int>(i);
+        }
+        Character& ally = *players_[static_cast<size_t>(best)];
+        int wis = Attributes::getModifier(actor->attributes.wisdom);
+        int amount = getRandomInt(1, 4) + wis;
+        if (amount < 1) amount = 1;
+        ally.heal(amount);
+        lastEvent_ = actor->name + " casts Healing Word on " + ally.name + " for " + std::to_string(amount) + " HP.";
+        dmSay("A soft glow knits " + ally.name + "'s wounds — Healing Word.");
+        addChatMessage("Combat", lastEvent_);
+        currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        return;
+    }
+
+    if (enemies_.empty() || targetEnemyIndex < 0 || static_cast<size_t>(targetEnemyIndex) >= enemies_.size()) return;
+    if (actor->resources <= 0) { lastEvent_ = "No uses remaining for that feature."; return; }
+    actor->resources--;
+
+    Character& enemy = *enemies_[static_cast<size_t>(targetEnemyIndex)];
+
+    if (actor->characterClass == CharacterClass::FIGHTER) {
+        dmSay(actor->name + " shouts and surges forward — Action Surge!");
+        // Extra attack action: two weapon attacks
+        performWeaponAttack(actor, enemy, playerIdx, true, targetEnemyIndex, false);
+        if (enemy.currentHp > 0) {
+            dmSay("Still standing! " + actor->name + " swings again.");
+            performWeaponAttack(actor, enemy, playerIdx, true, targetEnemyIndex, false);
+        }
+        if (enemy.currentHp <= 0) resolveEnemyDefeated(actor, targetEnemyIndex);
+        else currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        return;
+    }
+
+    if (actor->characterClass == CharacterClass::ROGUE) {
+        dmSay(actor->name + " slips into a flank and strikes — Sneak Attack!");
+        performWeaponAttack(actor, enemy, playerIdx, true, targetEnemyIndex, true);
+        if (enemy.currentHp <= 0) resolveEnemyDefeated(actor, targetEnemyIndex);
+        else currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        return;
+    }
+
+    if (actor->characterClass == CharacterClass::WIZARD) {
+        // Magic Missile: 3 darts of 1d4+1, auto-hit (SRD)
+        int total = 0;
+        for (int i = 0; i < 3; ++i) total += getRandomInt(1, 4) + 1;
+        enemy.takeDamage(total);
+        pushVisualEvent(VisualEventType::PLAYER_ATTACK, playerIdx);
+        pushVisualEvent(VisualEventType::ENEMY_DAMAGE, targetEnemyIndex);
+        lastEvent_ = actor->name + " casts Magic Missile! Three darts deal " + std::to_string(total) + " force damage to " + enemy.name + ".";
+        dmSay("Glowing darts streak unerringly to their mark.");
+        addChatMessage("Combat", lastEvent_);
+        if (enemy.currentHp <= 0) resolveEnemyDefeated(actor, targetEnemyIndex);
+        else currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        return;
+    }
+}
+
+void Game::playerRest() {
+    if (isMerchantRoom_) {
+        roomCount_++;
+        spawnRoomContent();
+        generateRoomDescription();
+        rollInitiative();
+        lastEvent_ = "You bid the merchant farewell and press deeper.";
+        dmSay("The merchant nods. "Luck in the dark, friends."");
+        return;
+    }
+    // Short Rest (5e-inspired): spend hit dice vibe — recover half missing HP + some features
+    for (auto& p : players_) {
+        int missing = p->maxHp - p->currentHp;
+        int recover = std::max(p->hitDie() + Attributes::getModifier(p->attributes.constitution), missing / 2);
+        if (recover < 1) recover = 1;
+        if (recover > missing && missing > 0) recover = missing;
+        if (missing == 0) recover = 0;
+        p->heal(recover);
+        p->resources = std::min(p->maxResources, p->resources + std::max(1, p->maxResources / 2));
+        p->isDowned = false;
+        p->deathSaveSuccesses = 0;
+        p->deathSaveFailures = 0;
+    }
+    lastEvent_ = "Short Rest complete. Wounds bind; some power returns.";
+    dmSay("You catch your breath in a quiet alcove. This is a Short Rest — a Long Rest will have to wait for safer ground.");
+    addJournalEntry("The party took a short rest.");
+    addChatMessage("Combat", lastEvent_);
     rollInitiative();
 }
 
@@ -322,12 +443,14 @@ void Game::playerInteract(const std::string& playerName) {
     if (hero->performSavingThrow(hero->attributes.intelligence, 12)) {
         hero->gold += 25;
         lastEvent_ = hero->name + " found 25 gold pieces!";
+        dmSay("A successful Investigation check reveals a hidden pouch.");
     } else {
         hero->takeDamage(3);
         int idx = 0;
         for(size_t i=0; i<players_.size(); ++i) if(players_[i].get() == hero) idx = static_cast<int>(i);
         pushVisualEvent(VisualEventType::PLAYER_DAMAGE, idx);
         lastEvent_ = "Fail! A trap hit " + hero->name + " for 3 damage!";
+        dmSay("A pressure plate clicks — poison darts!");
     }
 }
 
@@ -355,7 +478,12 @@ void Game::enemyTurn() {
         hero.takeDamage(dmg);
         pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
         lastEvent_ = enemy->name + " attacks " + hero.name + " for " + std::to_string(dmg) + " damage!";
-    } else lastEvent_ = enemy->name + " misses " + hero.name + "!";
+        addChatMessage("Combat", lastEvent_);
+        if (hero.isDowned) dmSay(hero.name + " drops! Death saving throws will follow on their turns.");
+    } else {
+        lastEvent_ = enemy->name + " misses " + hero.name + "!";
+        addChatMessage("Combat", lastEvent_);
+    }
 }
 
 void Game::addChatMessage(const std::string& sender, const std::string& message) {

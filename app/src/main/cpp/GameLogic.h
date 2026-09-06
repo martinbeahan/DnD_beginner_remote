@@ -86,9 +86,20 @@ struct Character {
         applyStatsForLevel();
         currentHp = maxHp;
         resources = maxResources;
+        if (characterClass == CharacterClass::FIGHTER) {
+            equippedWeapon = std::make_shared<Item>(Item{"Longsword", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Chain Shirt", ItemType::ARMOR, 3});
+        } else if (characterClass == CharacterClass::ROGUE) {
+            equippedWeapon = std::make_shared<Item>(Item{"Shortsword", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Leather Armor", ItemType::ARMOR, 1});
+        } else if (characterClass == CharacterClass::WIZARD) {
+            equippedWeapon = std::make_shared<Item>(Item{"Quarterstaff", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Traveler Clothes", ItemType::ARMOR, 0});
+        } else {
+            equippedWeapon = std::make_shared<Item>(Item{"Mace", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Scale Mail", ItemType::ARMOR, 4});
+        }
         calculateAC();
-        equippedWeapon = std::make_shared<Item>(Item{"Rusty Sword", ItemType::WEAPON, 0});
-        equippedArmor = std::make_shared<Item>(Item{"Tattered Rags", ItemType::ARMOR, 0});
     }
 
     void calculateAC() {
@@ -101,24 +112,27 @@ struct Character {
         switch (characterClass) {
             case CharacterClass::FIGHTER:
                 attributes = {16, 12, 14, 8, 10, 10};
-                maxHp = 10 + (level * 6);
-                maxResources = 2 + (level / 2);
+                maxResources = 2 + (level / 2); // Action Surge uses
                 break;
             case CharacterClass::WIZARD:
                 attributes = {8, 14, 12, 16, 10, 10};
-                maxHp = 6 + (level * 4);
-                maxResources = 2 + level;
+                maxResources = 2 + level; // spell slots (simplified)
                 break;
             case CharacterClass::ROGUE:
                 attributes = {10, 16, 12, 12, 10, 14};
-                maxHp = 8 + (level * 5);
                 maxResources = 1 + (level / 3);
                 break;
             case CharacterClass::CLERIC:
                 attributes = {14, 10, 14, 10, 16, 12};
-                maxHp = 8 + (level * 5);
                 maxResources = 2 + level;
                 break;
+        }
+        int conMod = Attributes::getModifier(attributes.constitution);
+        int hd = hitDie();
+        // Level 1: max hit die + CON; later levels: average hit die + CON
+        maxHp = (hd + conMod);
+        for (int lvl = 2; lvl <= level; ++lvl) {
+            int gain = (hd / 2 + 1) + conMod; if (gain < 1) gain = 1; maxHp += gain;
         }
     }
 
@@ -207,9 +221,29 @@ struct Character {
 
     std::string getSpecialAbilityName() const {
         if (characterClass == CharacterClass::FIGHTER) return "Action Surge";
-        if (characterClass == CharacterClass::WIZARD) return "Fireball";
+        if (characterClass == CharacterClass::WIZARD) return "Magic Missile";
         if (characterClass == CharacterClass::ROGUE) return "Sneak Attack";
         return "Healing Word";
+    }
+
+    int hitDie() const {
+        if (characterClass == CharacterClass::FIGHTER) return 10;
+        if (characterClass == CharacterClass::WIZARD) return 6;
+        if (characterClass == CharacterClass::ROGUE) return 8;
+        return 8; // cleric
+    }
+
+    int weaponDamageDie() const {
+        // SRD-flavored starter weapons
+        if (characterClass == CharacterClass::FIGHTER) return 8;  // longsword
+        if (characterClass == CharacterClass::ROGUE) return 6;    // shortsword
+        if (characterClass == CharacterClass::WIZARD) return 6;   // quarterstaff
+        return 6; // mace
+    }
+
+    int sneakAttackDice() const {
+        // 5e: 1d6 at 1st, +1d6 every odd level
+        return 1 + (level - 1) / 2;
     }
 };
 
@@ -229,20 +263,31 @@ public:
         return Attributes::getModifier(c.attributes.strength);
     }
 
+    static int proficiencyBonusForLevel(int level) {
+        // 5e proficiency: 2 at 1-4, 3 at 5-8, ...
+        return 2 + (level - 1) / 4;
+    }
+
     static RollResult performAttackRoll(const Character& attacker) {
         int die = rand() % 20 + 1;
         int mod = getPrimaryModifier(attacker);
+        int pb = proficiencyBonusForLevel(attacker.level);
         int weaponBonus = (attacker.equippedWeapon && attacker.equippedWeapon->type == ItemType::WEAPON) ? attacker.equippedWeapon->bonus : 0;
-        return { die + mod + weaponBonus, die, (die == 20), (die == 1) };
+        return { die + mod + pb + weaponBonus, die, (die == 20), (die == 1) };
     }
 
-    static int calculateDamage(const Character& attacker, bool isCritical) {
-        int die = (attacker.characterClass == CharacterClass::FIGHTER) ? 10 : 8;
-        int damage = rand() % die + 1;
-        if (isCritical) damage += rand() % die + 1;
+    static int calculateDamage(const Character& attacker, bool isCritical, int extraDice = 0, int extraSides = 6) {
+        int sides = attacker.weaponDamageDie();
+        int damage = (rand() % sides + 1);
+        if (isCritical) damage += (rand() % sides + 1); // 5e: double damage dice only
+        for (int i = 0; i < extraDice; ++i) {
+            damage += (rand() % extraSides + 1);
+            if (isCritical) damage += (rand() % extraSides + 1);
+        }
         int mod = getPrimaryModifier(attacker);
         int weaponBonus = (attacker.equippedWeapon && attacker.equippedWeapon->type == ItemType::WEAPON) ? attacker.equippedWeapon->bonus : 0;
-        return std::max(1, damage + mod + weaponBonus);
+        int total = damage + mod + weaponBonus;
+        return total < 1 ? 1 : total;
     }
 };
 
