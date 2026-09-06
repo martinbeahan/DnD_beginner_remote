@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
-    // alias(libs.plugins.google.services) // Commented out because google-services.json is missing
+    alias(libs.plugins.kotlin.android)
+    // Uncomment ONLY after you add app/google-services.json from the Firebase console:
+    // alias(libs.plugins.google.services)
 }
 
 android {
@@ -15,6 +17,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+            }
+        }
     }
 
     buildTypes {
@@ -27,8 +35,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
     }
     buildFeatures {
         prefab = true
@@ -39,6 +50,12 @@ android {
             version = "3.22.1"
         }
     }
+    packaging {
+        jniLibs {
+            // Avoid duplicate native libs from Game Activity prefab
+            pickFirsts += listOf("**/libc++_shared.so")
+        }
+    }
 }
 
 dependencies {
@@ -47,7 +64,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.games.activity)
 
-    // Firebase
+    // Firebase is optional until google-services.json is present
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database)
 

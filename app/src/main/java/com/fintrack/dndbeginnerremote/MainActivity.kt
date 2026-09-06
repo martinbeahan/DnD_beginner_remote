@@ -42,8 +42,19 @@ class MainActivity : GameActivity() {
     private var localPlayerName = "Hero"
 
     companion object {
+        private const val NATIVE_LIB = "dndbeginnerremote"
+        /** False if the C++ library failed to load (common when NDK/CMake build failed). */
+        @JvmStatic var nativeReady: Boolean = false
+            private set
+
         init {
-            System.loadLibrary("dndbeginnerremote")
+            try {
+                System.loadLibrary(NATIVE_LIB)
+                nativeReady = true
+            } catch (e: UnsatisfiedLinkError) {
+                nativeReady = false
+                Log.e("DnDMain", "Failed to load native library '$NATIVE_LIB'. Rebuild with NDK installed.", e)
+            }
         }
     }
 
@@ -84,6 +95,14 @@ class MainActivity : GameActivity() {
         }
 
         setContentView(R.layout.activity_main)
+
+        if (!nativeReady) {
+            Toast.makeText(
+                this,
+                "Native game library failed to load. In Android Studio: Tools → SDK Manager → SDK Tools → enable NDK and CMake, then Build → Rebuild Project.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
         
         statusText = findViewById(R.id.playerStatusText)
         logText = findViewById(R.id.combatLogText)
