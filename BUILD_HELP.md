@@ -27,3 +27,9 @@ Copy the **Build** output (the red error text) and share it. The most useful lin
 2. Put it in the `app/` folder.
 3. Uncomment `alias(libs.plugins.google.services)` in `app/build.gradle.kts`.
 4. Sync and rebuild.
+
+## 16 KB page size (Android Studio warning)
+This project pins **NDK 28.2.13676358**, enables flexible page sizes in CMake, and packages JNI libs without legacy compression so 64-bit `.so` files are 16 KB-aligned.
+
+In Android Studio: **Tools → SDK Manager → SDK Tools →** install/update **NDK (Side by side)** so version `28.2.13676358` is present, then **Build → Clean Project** and **Rebuild**.
+
