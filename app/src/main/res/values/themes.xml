@@ -27,9 +27,5 @@
         <item name="android:gravity">center</item>
         <item name="android:maxLines">2</item>
         <item name="backgroundTint">@null</item>
-        <item name="insetLeft">0dp</item>
-        <item name="insetRight">0dp</item>
-        <item name="insetTop">0dp</item>
-        <item name="insetBottom">0dp</item>
     </style>
 </resources>
