@@ -66,6 +66,7 @@ public:
     std::string getRoomDescription() const { return roomDescription_; }
     std::string getSessionId() const { return sessionId_; }
     std::string getPartyStatus() const;
+    std::string getBattleRoster() const;
     std::string getSpecialActionName() const;
 
     bool isGameOver() const { return gameOver_; }

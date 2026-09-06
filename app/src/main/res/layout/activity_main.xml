@@ -2,16 +2,15 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/transparent">
+    android:background="#121820">
 
-    <!-- Top Status Bar -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="12dp"
-        android:background="#CC101820"
+        android:padding="10dp"
+        android:background="#E0101820"
         android:layout_alignParentTop="true"
         android:gravity="center_vertical">
 
@@ -22,9 +21,9 @@
             android:layout_weight="1"
             android:text="Loading Party..."
             android:textColor="#FFFFFF"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:maxLines="6" />
+            android:maxLines="5" />
 
         <Button
             android:id="@+id/btnJournal"
@@ -45,37 +44,63 @@
             android:textSize="12sp"/>
     </LinearLayout>
 
-    <!-- Transparent hole so the native battle renderer is visible -->
-    <FrameLayout
-        android:id="@+id/battleArena"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_below="@id/topBar"
-        android:layout_above="@id/bottomControls"
-        android:background="@android:color/transparent" />
-
-    <!-- Room Description overlays the top of the battle area -->
     <TextView
         android:id="@+id/roomDescText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/topBar"
         android:background="#99000000"
-        android:padding="10dp"
+        android:padding="8dp"
         android:text="Room description..."
         android:textColor="#E0E0E0"
-        android:textSize="14sp"
+        android:textSize="13sp"
         android:fontFamily="serif"
         android:textStyle="italic" />
 
-    <!-- Bottom Controls and Log -->
+    <!-- Visible battle stage -->
+    <LinearLayout
+        android:id="@+id/battleArena"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/roomDescText"
+        android:layout_above="@id/bottomControls"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:gravity="center"
+        android:background="#FF1A2433">
+
+        <LinearLayout
+            android:id="@+id/partyColumn"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_vertical|start" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VS"
+            android:textColor="#80FFD700"
+            android:textStyle="bold"
+            android:padding="8dp" />
+
+        <LinearLayout
+            android:id="@+id/enemyColumn"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_vertical|end" />
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/bottomControls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:orientation="vertical"
-        android:background="#E0101820">
+        android:background="#F0101820">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -84,58 +109,13 @@
             android:padding="4dp"
             android:gravity="center">
 
-            <Button
-                android:id="@+id/btnAttack"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Atk"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/id_spacer1"
-                android:layout_width="2dp"
-                android:layout_height="match_parent"
-                android:visibility="invisible"/>
-
-            <Button
-                android:id="@+id/btnSpecial"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1.2"
-                android:text="Spec"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnInteract"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Srch"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnHeal"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Heal"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnRest"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Rest"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnReset"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Reset"
-                android:visibility="gone" />
+            <Button android:id="@+id/btnAttack" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Atk" android:textSize="12sp" />
+            <Button android:id="@+id/id_spacer1" android:layout_width="2dp" android:layout_height="match_parent" android:visibility="invisible"/>
+            <Button android:id="@+id/btnSpecial" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1.2" android:text="Spec" android:textSize="12sp" />
+            <Button android:id="@+id/btnInteract" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Srch" android:textSize="12sp" />
+            <Button android:id="@+id/btnHeal" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Heal" android:textSize="12sp" />
+            <Button android:id="@+id/btnRest" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Rest" android:textSize="12sp" />
+            <Button android:id="@+id/btnReset" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reset" android:visibility="gone" />
         </LinearLayout>
 
         <LinearLayout
@@ -164,18 +144,16 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="100dp"
+            android:layout_height="90dp"
             android:orientation="vertical"
             android:padding="8dp">
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Journal &amp; Chat"
                 android:textColor="#FFD700"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="italic" />
-
             <ScrollView
                 android:id="@+id/logScrollView"
                 android:layout_width="match_parent"
@@ -186,7 +164,7 @@
                     android:layout_height="wrap_content"
                     android:text="Welcome! Your turn."
                     android:textColor="#FFFFFF"
-                    android:textSize="14sp" />
+                    android:textSize="13sp" />
             </ScrollView>
         </LinearLayout>
     </LinearLayout>

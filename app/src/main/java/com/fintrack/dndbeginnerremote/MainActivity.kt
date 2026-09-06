@@ -12,6 +12,10 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.graphics.Color
+import android.view.Gravity
+import android.widget.ImageView
+import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.appcompat.app.AlertDialog
 import com.google.androidgamesdk.GameActivity
 import com.google.firebase.FirebaseApp
@@ -32,8 +36,12 @@ class MainActivity : GameActivity() {
     private lateinit var btnReset: Button
     private lateinit var btnSheet: Button
     private lateinit var btnJournal: Button
+    private lateinit var partyColumn: LinearLayout
+    private lateinit var enemyColumn: LinearLayout
     
     private var multiplayer: MultiplayerManager? = null
+    private var lastBattleRoster = ""
+    private var lastAnimEvent = ""
     private val handler = Handler(Looper.getMainLooper())
     private var lastProcessedEvent = ""
     private var lastRoomDesc = ""
@@ -60,6 +68,7 @@ class MainActivity : GameActivity() {
 
     // JNI Methods
     external fun getPlayerStatus(): String
+    external fun getBattleRoster(): String
     external fun getDetailedSheet(playerName: String): String
     external fun getJournal(): String
     external fun getLastEvent(): String
@@ -87,8 +96,6 @@ class MainActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "onCreate started")
-        // Let the native OpenGL battle surface show through the HUD overlay
-        window.setBackgroundDrawableResource(android.R.color.transparent)
 
         
         try {
@@ -120,14 +127,16 @@ class MainActivity : GameActivity() {
         btnReset = findViewById(R.id.btnReset)
         btnSheet = findViewById(R.id.btnSheet)
         btnJournal = findViewById(R.id.btnJournal)
+        partyColumn = findViewById(R.id.partyColumn)
+        enemyColumn = findViewById(R.id.enemyColumn)
 
         btnAttack.setOnClickListener { 
             Log.d(TAG, "Attack clicked")
             if (isMerchantRoom()) showShopDialog() 
-            else handleActionWithTarget("Attack") { i -> doAttack(i) } 
+            else handleActionWithTarget("Attack") { i -> doAttack(i); animateAttack(true) } 
         }
         
-        btnSpecial.setOnClickListener { Log.d(TAG, "Special clicked"); handleActionWithTarget("Special") { i -> doSpecial(i) } }
+        btnSpecial.setOnClickListener { Log.d(TAG, "Special clicked"); handleActionWithTarget("Special") { i -> doSpecial(i); animateAttack(true) } }
         btnHeal.setOnClickListener { Log.d(TAG, "Heal clicked"); handleActionWithTarget("Heal", false) { i -> doHeal(i) } }
         btnInteract.setOnClickListener { Log.d(TAG, "Interact clicked"); doInteract(localPlayerName); syncAndSave() }
         btnRest.setOnClickListener { Log.d(TAG, "Rest clicked"); doRest(); syncAndSave() }
@@ -202,6 +211,8 @@ class MainActivity : GameActivity() {
         val data = saveGameState()
         getPreferences(MODE_PRIVATE).edit().putString("save_state", data).apply()
         if (!isUpdatingFromRemote) multiplayer?.updateState(data)
+        lastBattleRoster = "" // force sprite/HP refresh
+        refreshBattleArena()
     }
 
     private fun showStartDialog() {
@@ -317,15 +328,17 @@ class MainActivity : GameActivity() {
         })
     }
 
+
     private fun updateUi() {
+        if (!nativeReady) return
         val status = getPlayerStatus()
         val isShop = isMerchantRoom()
-        
+
         statusText.text = status
         btnSpecial.text = if (isShop) "Status" else getSpecialName()
         btnAttack.text = if (isShop) "Shop" else "Attack"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
-        
+
         val isMyTurn = isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
         val isGameOver = status.contains("Game Over")
 
@@ -335,16 +348,176 @@ class MainActivity : GameActivity() {
         btnRest.isEnabled = isMyTurn && !isGameOver
 
         val roomDesc = getRoomDescription()
-        if (roomDesc != lastRoomDesc) { roomDescText.text = roomDesc; lastRoomDesc = roomDesc }
-        
+        if (roomDesc != lastRoomDesc) {
+            roomDescText.text = roomDesc
+            lastRoomDesc = roomDesc
+        }
+
         val chat = getChatHistory()
-        if (chat != lastChatHistory) { logText.text = chat; lastChatHistory = chat }
-        
+        if (chat != lastChatHistory) {
+            logText.text = chat
+            lastChatHistory = chat
+        }
+
         val lastEv = getLastEvent()
         if (lastEv.isNotEmpty() && lastEv != lastProcessedEvent) {
             if (!chat.contains(lastEv)) logText.text = "$lastEv\n${logText.text}"
             lastProcessedEvent = lastEv
             if (lastEv.contains("Game Over")) btnReset.visibility = View.VISIBLE
+            maybeAnimateFromEvent(lastEv)
+        }
+
+        refreshBattleArena()
+    }
+
+    private data class BattleUnit(
+        val isPlayer: Boolean,
+        val name: String,
+        val classId: Int,
+        val hp: Int,
+        val maxHp: Int
+    )
+
+    private fun parseBattleRoster(raw: String): Pair<List<BattleUnit>, List<BattleUnit>> {
+        val party = mutableListOf<BattleUnit>()
+        val foes = mutableListOf<BattleUnit>()
+        if (raw.isBlank()) return party to foes
+        val parts = raw.split('|', limit = 2)
+        fun parseSide(side: String, players: Boolean) {
+            if (side.isBlank()) return
+            for (entry in side.split(';')) {
+                if (entry.isBlank()) continue
+                val bits = entry.split(',')
+                if (bits.size < 5) continue
+                val list = if (players) party else foes
+                list += BattleUnit(
+                    isPlayer = players,
+                    name = bits[1],
+                    classId = bits[2].toIntOrNull() ?: 0,
+                    hp = bits[3].toIntOrNull() ?: 0,
+                    maxHp = bits[4].toIntOrNull() ?: 1
+                )
+            }
+        }
+        parseSide(parts.getOrNull(0).orEmpty(), true)
+        parseSide(parts.getOrNull(1).orEmpty(), false)
+        return party to foes
+    }
+
+    private fun spriteFor(unit: BattleUnit): Int {
+        if (!unit.isPlayer) {
+            val n = unit.name.lowercase()
+            return when {
+                n.contains("skeleton") -> R.drawable.sprite_skeleton
+                else -> R.drawable.sprite_goblin
+            }
+        }
+        return when (unit.classId) {
+            0 -> R.drawable.sprite_fighter
+            1 -> R.drawable.sprite_wizard
+            2 -> R.drawable.sprite_rogue
+            3 -> R.drawable.sprite_cleric
+            else -> R.drawable.sprite_fighter
+        }
+    }
+
+    private fun refreshBattleArena() {
+        val roster = getBattleRoster()
+        if (roster == lastBattleRoster) return
+        lastBattleRoster = roster
+        val (party, foes) = parseBattleRoster(roster)
+        rebuildColumn(partyColumn, party, alignEnd = false)
+        rebuildColumn(enemyColumn, foes, alignEnd = true)
+    }
+
+    private fun rebuildColumn(column: LinearLayout, units: List<BattleUnit>, alignEnd: Boolean) {
+        column.removeAllViews()
+        val density = resources.displayMetrics.density
+        val spriteSize = (96 * density).toInt()
+        for (unit in units) {
+            val wrap = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = if (alignEnd) Gravity.END else Gravity.START
+                setPadding(8, 8, 8, 8)
+                tag = unit.name
+            }
+            val img = ImageView(this).apply {
+                setImageResource(spriteFor(unit))
+                layoutParams = LinearLayout.LayoutParams(spriteSize, spriteSize)
+                adjustViewBounds = true
+                tag = "sprite"
+            }
+            val label = TextView(this).apply {
+                text = "${unit.name}\n${unit.hp}/${unit.maxHp}"
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                gravity = if (alignEnd) Gravity.END else Gravity.START
+            }
+            wrap.addView(img)
+            wrap.addView(label)
+            column.addView(wrap)
+        }
+    }
+
+    private fun findSpriteByName(column: LinearLayout, name: String): ImageView? {
+        for (i in 0 until column.childCount) {
+            val child = column.getChildAt(i)
+            if (child.tag == name) {
+                return child.findViewWithTag("sprite") as? ImageView
+            }
+        }
+        // fallback: first sprite in column
+        if (column.childCount > 0) {
+            return column.getChildAt(0).findViewWithTag("sprite") as? ImageView
+        }
+        return null
+    }
+
+    private fun firstSprite(column: LinearLayout): ImageView? {
+        if (column.childCount == 0) return null
+        return column.getChildAt(0).findViewWithTag("sprite") as? ImageView
+    }
+
+    private fun animateAttack(attackerIsPlayer: Boolean) {
+        val attackerCol = if (attackerIsPlayer) partyColumn else enemyColumn
+        val defenderCol = if (attackerIsPlayer) enemyColumn else partyColumn
+        val a = firstSprite(attackerCol) ?: return
+        val defendView = firstSprite(defenderCol)
+        val dx = if (attackerIsPlayer) 90f else -90f
+        a.animate().cancel()
+        a.translationX = 0f
+        a.animate()
+            .translationX(dx)
+            .setDuration(140)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction {
+                a.animate().translationX(0f).setDuration(180).start()
+                defendView?.let { d ->
+                    d.animate().cancel()
+                    d.animate()
+                        .scaleX(1.2f).scaleY(1.2f)
+                        .setDuration(90)
+                        .withEndAction {
+                            d.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+                        }.start()
+                }
+            }.start()
+    }
+
+    private fun maybeAnimateFromEvent(event: String) {
+        if (event == lastAnimEvent) return
+        lastAnimEvent = event
+        val e = event.lowercase()
+        when {
+            e.contains("attacks") || e.contains("hits") || e.contains("slashes") || e.contains("fireball") || e.contains("sneak") || e.contains("action surge") -> {
+                val playerSide = e.contains(localPlayerName.lowercase()) || e.contains("you ") || e.contains("party")
+                // If event mentions goblin/skeleton attacking, enemy side
+                val enemyAttack = e.contains("goblin") || e.contains("skeleton")
+                animateAttack(attackerIsPlayer = !(enemyAttack && !playerSide))
+            }
+            e.contains("damage") || e.contains("struck") || e.contains("wounded") -> {
+                animateAttack(attackerIsPlayer = true)
+            }
         }
     }
 

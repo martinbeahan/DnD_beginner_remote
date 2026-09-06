@@ -400,6 +400,25 @@ std::string Game::getPartyStatus() const {
     return ss.str();
 }
 
+
+std::string Game::getBattleRoster() const {
+    std::stringstream ss;
+    for (size_t i = 0; i < players_.size(); ++i) {
+        if (i) ss << ";";
+        ss << "P," << players_[i]->name << ","
+           << static_cast<int>(players_[i]->characterClass) << ","
+           << players_[i]->currentHp << "," << players_[i]->maxHp;
+    }
+    ss << "|";
+    for (size_t i = 0; i < enemies_.size(); ++i) {
+        if (i) ss << ";";
+        ss << "E," << enemies_[i]->name << ","
+           << static_cast<int>(enemies_[i]->characterClass) << ","
+           << enemies_[i]->currentHp << "," << enemies_[i]->maxHp;
+    }
+    return ss.str();
+}
+
 std::string Game::getSpecialActionName() const {
     Character* actor = (turnOrder_.empty() || currentTurnIndex_ < 0 || static_cast<size_t>(currentTurnIndex_) >= turnOrder_.size()) ? nullptr : turnOrder_[static_cast<size_t>(currentTurnIndex_)];
     if (actor) return actor->getSpecialAbilityName();

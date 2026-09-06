@@ -265,4 +265,11 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_sendChatMessage(JNIEnv *env, jo
     env->ReleaseStringUTFChars(message, nativeMsg);
 }
 
+
+JNIEXPORT jstring JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getBattleRoster(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return env->NewStringUTF(g_Game.getBattleRoster().c_str());
+}
+
 } // extern "C"
