@@ -119,6 +119,10 @@ private:
     std::mt19937 rng_;
 
     void enemyTurn();
+    void dmSay(const std::string& line);
+    int proficiencyBonus() const;
+    void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);
+    bool performWeaponAttack(Character* actor, Character& target, int attackerVisualIndex, bool targetIsEnemy, int targetIndex, bool sneakAttack);
     void pushVisualEvent(VisualEventType type, int index) { visualEvents_.push({type, index}); }
     Character* findCharacter(const std::string& name);
 };
