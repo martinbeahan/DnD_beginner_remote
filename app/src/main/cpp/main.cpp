@@ -3,6 +3,8 @@
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 #include <game-activity/GameActivity.h>
 #include <unistd.h>
+#include <exception>
+#include <string>
 
 #include "AndroidOut.h"
 #include "Renderer.h"
@@ -251,7 +253,13 @@ JNIEXPORT void JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_loadGameState(JNIEnv *env, jobject thiz, jstring data) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     const char *nativeData = env->GetStringUTFChars(data, nullptr);
-    g_Game.deserialize(nativeData);
+    try {
+        g_Game.deserialize(nativeData ? nativeData : "");
+    } catch (const std::exception& ex) {
+        aout << "loadGameState failed: " << ex.what() << std::endl;
+    } catch (...) {
+        aout << "loadGameState failed: unknown error" << std::endl;
+    }
     env->ReleaseStringUTFChars(data, nativeData);
 }
 
