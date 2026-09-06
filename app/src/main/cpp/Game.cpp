@@ -413,7 +413,7 @@ void Game::playerRest() {
         generateRoomDescription();
         rollInitiative();
         lastEvent_ = "You bid the merchant farewell and press deeper.";
-        dmSay("The merchant nods. "Luck in the dark, friends."");
+        dmSay("The merchant nods. \"Luck in the dark, friends.\"");
         return;
     }
     // Short Rest (5e-inspired): spend hit dice vibe — recover half missing HP + some features
