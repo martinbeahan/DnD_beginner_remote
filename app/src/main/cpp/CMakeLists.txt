@@ -17,16 +17,16 @@ add_library(dndbeginnerremote SHARED
         Game.cpp)
 
 # Searches for a package provided by the game activity dependency
-
-# Ensure 16 KB ELF segment alignment for arm64/x86_64 (Android 15+ / Play requirement)
-target_link_options(dndbeginnerremote PRIVATE
-        "-Wl,-z,max-page-size=16384")
-
 find_package(game-activity REQUIRED CONFIG)
 
-# Forces the linker to keep the JNI entry point for GameActivity
+# 16 KB page-size ELF alignment (required for Android 15+ / Play)
+# Apply both flags — max alone is not always enough on some NDK toolchains.
 set(CMAKE_SHARED_LINKER_FLAGS
-        "${CMAKE_SHARED_LINKER_FLAGS} -u Java_com_google_androidgamesdk_GameActivity_initializeNativeCode")
+        "${CMAKE_SHARED_LINKER_FLAGS} -u Java_com_google_androidgamesdk_GameActivity_initializeNativeCode -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384")
+
+target_link_options(dndbeginnerremote PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384")
 
 # Configure libraries CMake uses to link your target library.
 target_link_libraries(dndbeginnerremote

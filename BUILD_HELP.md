@@ -33,3 +33,16 @@ This project pins **NDK 28.2.13676358**, enables flexible page sizes in CMake, a
 
 In Android Studio: **Tools → SDK Manager → SDK Tools →** install/update **NDK (Side by side)** so version `28.2.13676358` is present, then **Build → Clean Project** and **Rebuild**.
 
+### If APK Analyzer still says 4 KB
+The native build cache is sticky. Do a hard clean:
+
+1. Confirm NDK **28.2.13676358** is installed (SDK Manager → SDK Tools → Show Package Details).
+2. Close the app if running.
+3. In a terminal in the project folder, run:
+   ```bash
+   rm -rf app/.cxx app/build build
+   ```
+4. In Android Studio: **File → Sync Project with Gradle Files**
+5. **Build → Rebuild Project**
+6. Analyze the new `app-debug.apk` again — `libdndbeginnerremote.so` should no longer say 4 KB.
+
