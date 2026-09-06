@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Top Status Bar -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:background="#80000000"
+        android:layout_alignParentTop="true"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/playerStatusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Loading Party..."
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnJournal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Log"
+            style="?android:attr/borderlessButtonStyle"
+            android:textColor="#FFD700"
+            android:textSize="12sp"/>
+
+        <Button
+            android:id="@+id/btnSheet"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sheet"
+            style="?android:attr/borderlessButtonStyle"
+            android:textColor="#00BFFF"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- Room Description -->
+    <TextView
+        android:id="@+id/roomDescText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/topBar"
+        android:background="#60000000"
+        android:padding="12dp"
+        android:text="Room description..."
+        android:textColor="#E0E0E0"
+        android:textSize="15sp"
+        android:fontFamily="serif"
+        android:textStyle="italic" />
+
+    <!-- Bottom Controls and Log -->
+    <LinearLayout
+        android:id="@+id/bottomControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical">
+
+        <!-- Action Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#90000000"
+            android:padding="4dp"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/btnAttack"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Atk"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/id_spacer1"
+                android:layout_width="2dp"
+                android:layout_height="match_parent"
+                android:visibility="invisible"/>
+
+            <Button
+                android:id="@+id/btnSpecial"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.2"
+                android:text="Spec"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnInteract"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Srch"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnHeal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Heal"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnRest"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Rest"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnReset"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reset"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Chat Input -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#A0000000"
+            android:padding="4dp">
+            <EditText
+                android:id="@+id/chatInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Roleplay / Chat..."
+                android:textColor="#FFFFFF"
+                android:textColorHint="#80FFFFFF"
+                android:background="@android:color/transparent"
+                android:padding="8dp"/>
+            <Button
+                android:id="@+id/btnSendChat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Send"
+                style="?android:attr/borderlessButtonStyle"
+                android:textColor="#FFD700"/>
+        </LinearLayout>
+
+        <!-- Combat/Chat Log -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:background="#B0000000"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Journal &amp; Chat"
+                android:textColor="#FFD700"
+                android:textSize="14sp"
+                android:textStyle="italic" />
+
+            <ScrollView
+                android:id="@+id/logScrollView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+                <TextView
+                    android:id="@+id/combatLogText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Welcome! Your turn."
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+            </ScrollView>
+        </LinearLayout>
+    </LinearLayout>
+</RelativeLayout>
