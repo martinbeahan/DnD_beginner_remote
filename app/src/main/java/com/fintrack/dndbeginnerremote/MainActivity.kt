@@ -36,6 +36,7 @@ class MainActivity : GameActivity() {
     private lateinit var btnReset: Button
     private lateinit var btnSheet: Button
     private lateinit var btnJournal: Button
+    private lateinit var btnHelp: Button
     private lateinit var partyColumn: LinearLayout
     private lateinit var enemyColumn: LinearLayout
     
@@ -48,6 +49,10 @@ class MainActivity : GameActivity() {
     private var lastChatHistory = ""
     private var isUpdatingFromRemote = false
     private var localPlayerName = "Hero"
+    private var localClassId = 0
+    private var lastCoachTip = ""
+    private var lastCoachTurnKey = ""
+    private var soloCoachEnabled = true
 
     companion object {
         private const val NATIVE_LIB = "dndbeginnerremote"
@@ -127,6 +132,7 @@ class MainActivity : GameActivity() {
         btnReset = findViewById(R.id.btnReset)
         btnSheet = findViewById(R.id.btnSheet)
         btnJournal = findViewById(R.id.btnJournal)
+        btnHelp = findViewById(R.id.btnHelp)
         partyColumn = findViewById(R.id.partyColumn)
         enemyColumn = findViewById(R.id.enemyColumn)
 
@@ -153,6 +159,7 @@ class MainActivity : GameActivity() {
 
         btnSheet.setOnClickListener { showCharacterSheet() }
         btnJournal.setOnClickListener { showJournal() }
+        btnHelp.setOnClickListener { showHelpMenu() }
         btnReset.setOnClickListener { showStartDialog() }
 
         findViewById<View>(R.id.topBar).setOnLongClickListener {
@@ -163,6 +170,7 @@ class MainActivity : GameActivity() {
             true
         }
 
+        soloCoachEnabled = prefs().getBoolean("solo_coach_enabled", true)
         showStartDialog()
         startUiUpdateLoop()
     }
@@ -213,6 +221,7 @@ class MainActivity : GameActivity() {
         if (!isUpdatingFromRemote) multiplayer?.updateState(data)
         lastBattleRoster = "" // force sprite/HP refresh
         refreshBattleArena()
+        maybeSoloDmCoach(status, isShop)
     }
 
     private fun showStartDialog() {
@@ -243,10 +252,12 @@ class MainActivity : GameActivity() {
         val classes = arrayOf("Fighter", "Wizard", "Rogue", "Cleric")
         AlertDialog.Builder(this).setTitle("Choose Your Role").setItems(classes) { _, which ->
             Log.d(TAG, "Class $which selected. NewGame=$isNewGame")
+            localClassId = which
             if (isNewGame) {
                 resetGame(which, localPlayerName)
                 setHost(true)
                 setupMultiplayer(getSessionId())
+                maybeOfferTutorialThenCoach()
             } else {
                 setHost(false)
                 setupMultiplayer(sid, isNewPlayer = true, selectedClass = which)
@@ -370,6 +381,7 @@ class MainActivity : GameActivity() {
         }
 
         refreshBattleArena()
+        maybeSoloDmCoach(status, isShop)
     }
 
     private data class BattleUnit(
@@ -526,6 +538,102 @@ class MainActivity : GameActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemUi()
+    }
+
+
+    private fun prefs() = getPreferences(MODE_PRIVATE)
+
+    private fun maybeOfferTutorialThenCoach() {
+        val seen = prefs().getBoolean("seen_beginner_tutorial", false)
+        if (!seen) {
+            showTutorial(0) {
+                prefs().edit().putBoolean("seen_beginner_tutorial", true).apply()
+                postCoach(
+                    "DM: Tutorial done. I'll coach you on your turns. Tap Help anytime. " +
+                        BeginnerGuide.specialBlurb(localClassId)
+                )
+            }
+        } else {
+            postCoach("DM: Welcome back. Tap Help if you forget what a button does.")
+        }
+    }
+
+    private fun showHelpMenu() {
+        val options = arrayOf("Show beginner tutorial", "Action quick reference", "Toggle solo DM tips")
+        AlertDialog.Builder(this)
+            .setTitle("Help")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showTutorial(0) {}
+                    1 -> AlertDialog.Builder(this)
+                        .setTitle("Actions")
+                        .setMessage(BeginnerGuide.actionReference())
+                        .setPositiveButton("Got it", null)
+                        .show()
+                    2 -> {
+                        soloCoachEnabled = !soloCoachEnabled
+                        val state = if (soloCoachEnabled) "ON" else "OFF"
+                        Toast.makeText(this, "Solo DM tips: $state", Toast.LENGTH_SHORT).show()
+                        prefs().edit().putBoolean("solo_coach_enabled", soloCoachEnabled).apply()
+                    }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showTutorial(pageIndex: Int, onFinished: () -> Unit) {
+        if (pageIndex !in BeginnerGuide.tutorialPages.indices) {
+            onFinished()
+            return
+        }
+        val page = BeginnerGuide.tutorialPages[pageIndex]
+        val last = pageIndex == BeginnerGuide.tutorialPages.lastIndex
+        val builder = AlertDialog.Builder(this)
+            .setTitle(page.title)
+            .setMessage(page.body)
+            .setCancelable(false)
+        if (last) {
+            builder.setPositiveButton("Let's play") { _, _ -> onFinished() }
+            builder.setNeutralButton("Back") { _, _ -> showTutorial(pageIndex - 1, onFinished) }
+        } else {
+            builder.setPositiveButton("Next") { _, _ -> showTutorial(pageIndex + 1, onFinished) }
+            if (pageIndex > 0) {
+                builder.setNeutralButton("Back") { _, _ -> showTutorial(pageIndex - 1, onFinished) }
+            }
+            builder.setNegativeButton("Skip") { _, _ -> onFinished() }
+        }
+        builder.show()
+    }
+
+    private fun postCoach(tip: String) {
+        if (!nativeReady || tip.isBlank()) return
+        if (tip == lastCoachTip) return
+        lastCoachTip = tip
+        try {
+            sendChatMessage("DM", tip)
+        } catch (e: Exception) {
+            Log.e(TAG, "coach chat failed: ${e.message}")
+        }
+        // Also surface in the on-screen log immediately
+        logText.text = "$tip
+${logText.text}"
+    }
+
+    private fun maybeSoloDmCoach(status: String, isShop: Boolean) {
+        if (!soloCoachEnabled || !nativeReady) return
+        val turnKey = status.lineSequence().firstOrNull { it.contains("Turn:") } ?: status.take(40)
+        if (turnKey == lastCoachTurnKey) return
+        lastCoachTurnKey = turnKey
+        val special = try { getSpecialName() } catch (_: Exception) { "Special" }
+        val tip = BeginnerGuide.turnCoachTip(
+            status = status,
+            localPlayerName = localPlayerName,
+            isShop = isShop,
+            specialName = special,
+            classId = localClassId
+        ) ?: return
+        postCoach(tip)
     }
 
     private fun hideSystemUi() {
