@@ -387,10 +387,11 @@ class MainActivity : GameActivity() {
         statusText.text = roomLine.substringBefore("|").trim().ifBlank { roomLine }
 
         val specialName = try { getSpecialName() } catch (_: Exception) { "Special" }
-        btnSpecial.text = if (isShop) "Info" else "✦ $specialName"
-        btnAttack.text = if (isShop) "🛒 Shop" else "⚔ Attack"
-        btnHeal.text = "⚗ Potion"
-        btnRest.text = if (isShop) "Leave" else "🌙 Rest"
+        // Two-line labels so text stays visible on narrow / large-font screens
+        btnSpecial.text = if (isShop) "Info" else "✦\n$specialName"
+        btnAttack.text = if (isShop) "🛒\nShop" else "⚔\nAttack"
+        btnHeal.text = "⚗\nPotion"
+        btnRest.text = if (isShop) "Leave" else "🌙\nRest"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
 
         val isMyTurn = isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")

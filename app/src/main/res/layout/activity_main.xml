@@ -46,36 +46,33 @@
             android:id="@+id/btnJournal"
             style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
             android:minWidth="0dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
             android:text="Log"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:maxLines="1" />
 
         <Button
             android:id="@+id/btnSheet"
             style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
             android:minWidth="0dp"
             android:layout_marginStart="4dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
             android:text="Sheet"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:maxLines="1" />
 
         <Button
             android:id="@+id/btnHelp"
             style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
             android:minWidth="0dp"
             android:layout_marginStart="4dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
             android:text="?"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:maxLines="1" />
     </LinearLayout>
 
     <!-- Parchment room blurb -->
@@ -189,12 +186,60 @@
                 android:orientation="horizontal"
                 android:gravity="center">
 
-                <Button android:id="@+id/btnAttack" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="⚔ Attack" android:textSize="11sp" android:layout_marginEnd="6dp" />
-                <Button android:id="@+id/btnSpecial" style="@style/Widget.DnD.ActionButton" android:layout_width="100dp" android:layout_height="52dp" android:text="✦ Special" android:textSize="11sp" android:layout_marginEnd="6dp" />
-                <Button android:id="@+id/btnHeal" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="⚗ Potion" android:textSize="11sp" android:layout_marginEnd="6dp" />
-                <Button android:id="@+id/btnInteract" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="🔍 Search" android:textSize="11sp" android:layout_marginEnd="6dp" />
-                <Button android:id="@+id/btnRest" style="@style/Widget.DnD.ActionButton" android:layout_width="96dp" android:layout_height="52dp" android:text="🌙 Rest" android:textSize="11sp" android:layout_marginEnd="6dp" />
-                <Button android:id="@+id/btnReset" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="Reset" android:textSize="11sp" android:visibility="gone" />
+                <Button
+                    android:id="@+id/btnAttack"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="⚔&#10;Attack"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="6dp" />
+                <Button
+                    android:id="@+id/btnSpecial"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="✦&#10;Special"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="6dp" />
+                <Button
+                    android:id="@+id/btnHeal"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="⚗&#10;Potion"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="6dp" />
+                <Button
+                    android:id="@+id/btnInteract"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="🔍&#10;Search"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="6dp" />
+                <Button
+                    android:id="@+id/btnRest"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="🌙&#10;Rest"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="6dp" />
+                <Button
+                    android:id="@+id/btnReset"
+                    style="@style/Widget.DnD.ActionButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="64dp"
+                    android:text="Reset"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
                 <!-- spacer id kept for old code references if any -->
                 <Button android:id="@+id/id_spacer1" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
             </LinearLayout>
