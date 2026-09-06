@@ -1,13 +1,13 @@
 <resources>
     <style name="Theme.DnDBeginnerRemote" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_200</item>
+        <item name="colorPrimary">@color/gold</item>
         <item name="colorPrimaryVariant">@color/purple_700</item>
-        <item name="colorOnPrimary">@color/black</item>
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorSecondaryVariant">@color/teal_200</item>
-        <item name="colorOnSecondary">@color/black</item>
-        <item name="android:statusBarColor">#101820</item>
-        <item name="android:windowBackground">#121820</item>
-        <item name="android:navigationBarColor">#101820</item>
+        <item name="colorOnPrimary">@color/ink</item>
+        <item name="colorSecondary">@color/parchment_dark</item>
+        <item name="colorSecondaryVariant">@color/stone</item>
+        <item name="colorOnSecondary">@color/parchment</item>
+        <item name="android:statusBarColor">@color/dungeon_bg</item>
+        <item name="android:windowBackground">@color/dungeon_bg</item>
+        <item name="android:navigationBarColor">@color/dungeon_bg</item>
     </style>
 </resources>

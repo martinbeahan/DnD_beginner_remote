@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <color name="purple_200">#FFD4A017</color>
+    <color name="purple_500">#FF8B5A2B</color>
+    <color name="purple_700">#FF3E2723</color>
+    <color name="teal_200">#FFC9A227</color>
+    <color name="teal_700">#FF6D4C41</color>
     <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <color name="white">#FFF5F0E6</color>
+
+    <color name="dungeon_bg">#FF1A1410</color>
+    <color name="dungeon_panel">#E62A2118</color>
+    <color name="parchment">#FFE8D5A3</color>
+    <color name="parchment_dark">#FFC4A574</color>
+    <color name="ink">#FF2C1810</color>
+    <color name="gold">#FFE0C060</color>
+    <color name="blood">#FF8B1E1E</color>
+    <color name="hp_fill">#FF2E7D32</color>
+    <color name="stone">#FF3A322C</color>
 </resources>
