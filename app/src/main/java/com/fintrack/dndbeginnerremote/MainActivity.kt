@@ -616,8 +616,7 @@ class MainActivity : GameActivity() {
             Log.e(TAG, "coach chat failed: ${e.message}")
         }
         // Also surface in the on-screen log immediately
-        logText.text = "$tip
-${logText.text}"
+        logText.text = "$tip\n${logText.text}"
     }
 
     private fun maybeSoloDmCoach(status: String, isShop: Boolean) {
