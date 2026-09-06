@@ -87,6 +87,9 @@ class MainActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "onCreate started")
+        // Let the native OpenGL battle surface show through the HUD overlay
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+
         
         try {
             FirebaseApp.initializeApp(this)
