@@ -10,7 +10,7 @@
         <item name="android:windowBackground">@color/dungeon_bg</item>
         <item name="android:navigationBarColor">@color/dungeon_bg</item>
         <item name="android:textColorPrimary">@color/parchment</item>
-        <item name="buttonStyle">@style/Widget.DnD.ActionButton</item>
+        <!-- Do NOT set buttonStyle globally — Samsung AlertDialogs crash/mis-draw with custom Material backgrounds. -->
     </style>
 
     <style name="Widget.DnD.ActionButton" parent="Widget.MaterialComponents.Button">
@@ -24,13 +24,12 @@
         <item name="android:paddingEnd">8dp</item>
         <item name="android:paddingTop">6dp</item>
         <item name="android:paddingBottom">6dp</item>
-        <item name="android:insetLeft">0dp</item>
-        <item name="android:insetRight">0dp</item>
-        <item name="android:insetTop">0dp</item>
-        <item name="android:insetBottom">0dp</item>
         <item name="android:gravity">center</item>
         <item name="android:maxLines">2</item>
-        <item name="android:lineSpacingExtra">0dp</item>
         <item name="backgroundTint">@null</item>
+        <item name="insetLeft">0dp</item>
+        <item name="insetRight">0dp</item>
+        <item name="insetTop">0dp</item>
+        <item name="insetBottom">0dp</item>
     </style>
 </resources>
