@@ -2,81 +2,112 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121820">
+    android:background="@color/dungeon_bg"
+    android:padding="8dp">
 
+    <!-- Slim top HUD -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="10dp"
-        android:background="#E0101820"
         android:layout_alignParentTop="true"
-        android:gravity="center_vertical">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_dungeon_panel"
+        android:padding="8dp">
 
-        <TextView
-            android:id="@+id/playerStatusText"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Loading Party..."
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:maxLines="5" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/turnBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Your turn"
+                android:textColor="@color/gold"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/playerStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Room 1"
+                android:textColor="@color/parchment"
+                android:textSize="11sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
 
         <Button
             android:id="@+id/btnJournal"
+            style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
             android:text="Log"
-            style="?android:attr/borderlessButtonStyle"
-            android:textColor="#FFD700"
-            android:textSize="12sp"/>
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/btnSheet"
+            style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:layout_marginStart="4dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
             android:text="Sheet"
-            style="?android:attr/borderlessButtonStyle"
-            android:textColor="#00BFFF"
-            android:textSize="12sp"/>
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/btnHelp"
+            style="@style/Widget.DnD.ActionButton"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Help"
-            style="?android:attr/borderlessButtonStyle"
-            android:textColor="#7CFFB2"
-            android:textSize="12sp"/>
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:layout_marginStart="4dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:text="?"
+            android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- Parchment room blurb -->
     <TextView
         android:id="@+id/roomDescText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/topBar"
-        android:background="#99000000"
-        android:padding="8dp"
-        android:text="Room description..."
-        android:textColor="#E0E0E0"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_parchment"
+        android:padding="10dp"
+        android:text="The torchlight flickers…"
+        android:textColor="@color/ink"
         android:textSize="13sp"
         android:fontFamily="serif"
-        android:textStyle="italic" />
+        android:textStyle="italic"
+        android:maxLines="3"
+        android:ellipsize="end" />
 
-    <!-- Visible battle stage -->
+    <!-- Battle stage (main focus) -->
     <LinearLayout
         android:id="@+id/battleArena"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_below="@id/roomDescText"
         android:layout_above="@id/bottomControls"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:padding="12dp"
         android:gravity="center"
-        android:background="#FF1A2433">
+        android:background="@drawable/bg_battle_stage">
 
         <LinearLayout
             android:id="@+id/partyColumn"
@@ -89,10 +120,10 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="VS"
-            android:textColor="#80FFD700"
-            android:textStyle="bold"
-            android:padding="8dp" />
+            android:text="⚔"
+            android:textSize="22sp"
+            android:textColor="@color/gold"
+            android:padding="6dp" />
 
         <LinearLayout
             android:id="@+id/enemyColumn"
@@ -103,78 +134,77 @@
             android:gravity="center_vertical|end" />
     </LinearLayout>
 
+    <!-- Bottom: actions + slim event ticker -->
     <LinearLayout
         android:id="@+id/bottomControls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:orientation="vertical"
-        android:background="#F0101820">
+        android:background="@drawable/bg_dungeon_panel"
+        android:padding="8dp">
 
+        <TextView
+            android:id="@+id/combatLogText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="The adventure begins…"
+            android:textColor="@color/parchment"
+            android:textSize="12sp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:paddingBottom="6dp" />
+
+        <!-- Hidden chat row kept for code compatibility; collapsed by default height 0 via gone -->
         <LinearLayout
+            android:id="@+id/chatRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="4dp"
-            android:gravity="center">
-
-            <Button android:id="@+id/btnAttack" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Atk" android:textSize="12sp" />
-            <Button android:id="@+id/id_spacer1" android:layout_width="2dp" android:layout_height="match_parent" android:visibility="invisible"/>
-            <Button android:id="@+id/btnSpecial" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1.2" android:text="Spec" android:textSize="12sp" />
-            <Button android:id="@+id/btnInteract" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Srch" android:textSize="12sp" />
-            <Button android:id="@+id/btnHeal" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Heal" android:textSize="12sp" />
-            <Button android:id="@+id/btnRest" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Rest" android:textSize="12sp" />
-            <Button android:id="@+id/btnReset" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reset" android:visibility="gone" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="4dp">
+            android:visibility="gone">
             <EditText
                 android:id="@+id/chatInput"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Roleplay / Chat..."
-                android:textColor="#FFFFFF"
-                android:textColorHint="#80FFFFFF"
-                android:background="@android:color/transparent"
-                android:padding="8dp"/>
+                android:hint="Say something…"
+                android:textColor="@color/parchment"
+                android:textColorHint="#80E8D5A3"
+                android:textSize="12sp" />
             <Button
                 android:id="@+id/btnSendChat"
+                style="@style/Widget.DnD.ActionButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Send"
-                style="?android:attr/borderlessButtonStyle"
-                android:textColor="#FFD700"/>
+                android:layout_height="40dp"
+                android:text="Send" />
         </LinearLayout>
 
-        <LinearLayout
+        <HorizontalScrollView
             android:layout_width="match_parent"
-            android:layout_height="90dp"
-            android:orientation="vertical"
-            android:padding="8dp">
-            <TextView
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Journal &amp; Chat"
-                android:textColor="#FFD700"
-                android:textSize="12sp"
-                android:textStyle="italic" />
-            <ScrollView
-                android:id="@+id/logScrollView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent">
-                <TextView
-                    android:id="@+id/combatLogText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Welcome! Your turn."
-                    android:textColor="#FFFFFF"
-                    android:textSize="13sp" />
-            </ScrollView>
-        </LinearLayout>
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <Button android:id="@+id/btnAttack" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="⚔ Attack" android:textSize="11sp" android:layout_marginEnd="6dp" />
+                <Button android:id="@+id/btnSpecial" style="@style/Widget.DnD.ActionButton" android:layout_width="100dp" android:layout_height="52dp" android:text="✦ Special" android:textSize="11sp" android:layout_marginEnd="6dp" />
+                <Button android:id="@+id/btnHeal" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="⚗ Potion" android:textSize="11sp" android:layout_marginEnd="6dp" />
+                <Button android:id="@+id/btnInteract" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="🔍 Search" android:textSize="11sp" android:layout_marginEnd="6dp" />
+                <Button android:id="@+id/btnRest" style="@style/Widget.DnD.ActionButton" android:layout_width="96dp" android:layout_height="52dp" android:text="🌙 Rest" android:textSize="11sp" android:layout_marginEnd="6dp" />
+                <Button android:id="@+id/btnReset" style="@style/Widget.DnD.ActionButton" android:layout_width="88dp" android:layout_height="52dp" android:text="Reset" android:textSize="11sp" android:visibility="gone" />
+                <!-- spacer id kept for old code references if any -->
+                <Button android:id="@+id/id_spacer1" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+            </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
+
+    <!-- Keep logScrollView id for compatibility (unused visually) -->
+    <ScrollView
+        android:id="@+id/logScrollView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
 </RelativeLayout>

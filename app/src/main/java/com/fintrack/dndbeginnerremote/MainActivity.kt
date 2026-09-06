@@ -15,6 +15,7 @@ import android.widget.Toast
 import android.graphics.Color
 import android.view.Gravity
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.appcompat.app.AlertDialog
 import com.google.androidgamesdk.GameActivity
@@ -24,6 +25,7 @@ class MainActivity : GameActivity() {
     private val TAG = "DnDMain"
 
     private lateinit var statusText: TextView
+    private lateinit var turnBanner: TextView
     private lateinit var logText: TextView
     private lateinit var roomDescText: TextView
     private lateinit var chatInput: EditText
@@ -120,6 +122,7 @@ class MainActivity : GameActivity() {
         }
         
         statusText = findViewById(R.id.playerStatusText)
+        turnBanner = findViewById(R.id.turnBanner)
         logText = findViewById(R.id.combatLogText)
         roomDescText = findViewById(R.id.roomDescText)
         chatInput = findViewById(R.id.chatInput)
@@ -326,7 +329,30 @@ class MainActivity : GameActivity() {
             .show()
     }
 
-    private fun showJournal() = AlertDialog.Builder(this).setTitle("Journal").setMessage(getJournal()).setPositiveButton("Close", null).show()
+    private fun showJournal() {
+        if (!nativeReady) return
+        val journal = try { getJournal() } catch (_: Exception) { "" }
+        val chatLog = try { getChatHistory() } catch (_: Exception) { "" }
+        val recent = chatLog.lineSequence()
+            .filter { it.isNotBlank() }
+            .toList()
+            .takeLast(12)
+            .joinToString("\n")
+        val body = buildString {
+            if (recent.isNotBlank()) {
+                append("Recent\n")
+                append(recent)
+                append("\n\n")
+            }
+            append("Journal\n")
+            append(journal.ifBlank { "(empty)" })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Adventure Log")
+            .setMessage(body)
+            .setPositiveButton("Close", null)
+            .show()
+    }
 
     private fun startUiUpdateLoop() {
         handler.post(object : Runnable {
@@ -344,11 +370,27 @@ class MainActivity : GameActivity() {
         val status = getPlayerStatus()
         val isShop = isMerchantRoom()
 
-        statusText.text = status
-        btnSpecial.text = if (isShop) "Status" else getSpecialName()
-        btnAttack.text = if (isShop) "Shop" else "Attack"
-        btnHeal.text = "Potion"
-        if (!isShop) btnRest.text = "Short Rest" else btnRest.text = "Leave"
+        // Compact HUD — full sheet stays behind Sheet
+        val turnLine = status.lineSequence().firstOrNull { it.contains("Turn:") } ?: "Turn: —"
+        val roomLine = status.lineSequence().firstOrNull {
+            it.startsWith("Room") || it.contains("Room ")
+        } ?: "Room ?"
+        val whose = turnLine.substringAfter("Turn:", "—").trim()
+        val myTurnBanner = whose.equals(localPlayerName, ignoreCase = true) ||
+            whose.equals("You", ignoreCase = true)
+        turnBanner.text = when {
+            isShop -> "Safe haven — merchant"
+            status.contains("Game Over", ignoreCase = true) -> "Defeat…"
+            myTurnBanner -> "Your move, $localPlayerName"
+            else -> "$whose acts…"
+        }
+        statusText.text = roomLine.substringBefore("|").trim().ifBlank { roomLine }
+
+        val specialName = try { getSpecialName() } catch (_: Exception) { "Special" }
+        btnSpecial.text = if (isShop) "Info" else "✦ $specialName"
+        btnAttack.text = if (isShop) "🛒 Shop" else "⚔ Attack"
+        btnHeal.text = "⚗ Potion"
+        btnRest.text = if (isShop) "Leave" else "🌙 Rest"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
 
         val isMyTurn = isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
@@ -367,13 +409,15 @@ class MainActivity : GameActivity() {
 
         val chat = getChatHistory()
         if (chat != lastChatHistory) {
-            logText.text = chat
             lastChatHistory = chat
+            if (chat.isNotBlank()) {
+                logText.text = chat.lineSequence().lastOrNull().orEmpty()
+            }
         }
 
         val lastEv = getLastEvent()
         if (lastEv.isNotEmpty() && lastEv != lastProcessedEvent) {
-            if (!chat.contains(lastEv)) logText.text = "$lastEv\n${logText.text}"
+            logText.text = lastEv
             lastProcessedEvent = lastEv
             if (lastEv.contains("Game Over")) btnReset.visibility = View.VISIBLE
             maybeAnimateFromEvent(lastEv)
@@ -446,12 +490,14 @@ class MainActivity : GameActivity() {
     private fun rebuildColumn(column: LinearLayout, units: List<BattleUnit>, alignEnd: Boolean) {
         column.removeAllViews()
         val density = resources.displayMetrics.density
-        val spriteSize = (96 * density).toInt()
+        val spriteSize = (104 * density).toInt()
+        val barW = (88 * density).toInt()
+        val barH = (10 * density).toInt()
         for (unit in units) {
             val wrap = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = if (alignEnd) Gravity.END else Gravity.START
-                setPadding(8, 8, 8, 8)
+                setPadding(6, 6, 6, 6)
                 tag = unit.name
             }
             val img = ImageView(this).apply {
@@ -459,15 +505,34 @@ class MainActivity : GameActivity() {
                 layoutParams = LinearLayout.LayoutParams(spriteSize, spriteSize)
                 adjustViewBounds = true
                 tag = "sprite"
+                alpha = if (unit.hp <= 0) 0.35f else 1f
             }
-            val label = TextView(this).apply {
-                text = "${unit.name}\n${unit.hp}/${unit.maxHp}"
-                setTextColor(Color.WHITE)
-                textSize = 11f
+            val name = TextView(this).apply {
+                text = unit.name
+                setTextColor(Color.parseColor("#FFE8D5A3"))
+                textSize = 12f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                gravity = if (alignEnd) Gravity.END else Gravity.START
+            }
+            val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = unit.maxHp.coerceAtLeast(1)
+                progress = unit.hp.coerceIn(0, max)
+                layoutParams = LinearLayout.LayoutParams(barW, barH).apply {
+                    topMargin = (4 * density).toInt()
+                    bottomMargin = (2 * density).toInt()
+                }
+                progressDrawable = getDrawable(R.drawable.bg_hp_bar)?.mutate()
+            }
+            val hp = TextView(this).apply {
+                text = "${unit.hp}/${unit.maxHp}"
+                setTextColor(Color.parseColor("#FFB0A090"))
+                textSize = 10f
                 gravity = if (alignEnd) Gravity.END else Gravity.START
             }
             wrap.addView(img)
-            wrap.addView(label)
+            wrap.addView(name)
+            wrap.addView(bar)
+            wrap.addView(hp)
             column.addView(wrap)
         }
     }
