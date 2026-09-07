@@ -130,9 +130,12 @@ private:
     std::mt19937 rng_;
 
     void enemyTurn();
+    void allyTurn();
+    bool isAllyAi(const Character* c) const;
     void removeFromTurnOrder(Character* c);
     void checkPartyDefeat();
     void advanceTurn();
+    void purgeDownedEnemies();
     void dmSay(const std::string& line);
     int proficiencyBonus() const;
     void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);

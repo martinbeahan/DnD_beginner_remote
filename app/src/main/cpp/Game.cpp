@@ -31,6 +31,8 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     roomCount_ = 1;
     dmOnlyTable_ = false;
     dmName_.clear();
+    // Local / solo table is always the turn authority (clients opt out via prepareClientJoin).
+    isHost_ = true;
 
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
     addAlly("Melf (NPC)", CharacterClass::WIZARD);
@@ -337,6 +339,87 @@ void Game::checkPartyDefeat() {
     }
 }
 
+bool Game::isAllyAi(const Character* c) const {
+    if (!c) return false;
+    if (c->name.find("(NPC)") != std::string::npos) return true;
+    // Solo starter ally uses uid "ally-N"; never treat the local hero as AI.
+    if (c->uid.rfind("ally-", 0) == 0) return true;
+    return false;
+}
+
+void Game::purgeDownedEnemies() {
+    // Drop 0-HP foes out of the encounter without touching a dangling turnOrder_ pointer.
+    bool removed = false;
+    for (auto it = enemies_.begin(); it != enemies_.end(); ) {
+        if ((*it)->currentHp <= 0 || (*it)->isDowned) {
+            addJournalEntry("Defeated " + (*it)->name);
+            removeFromTurnOrder(it->get());
+            it = enemies_.erase(it);
+            removed = true;
+        } else {
+            ++it;
+        }
+    }
+    if (!removed) return;
+    if (enemies_.empty()) {
+        int xpGained = 50 + (roomCount_ * 15);
+        for (auto& p : players_) {
+            if (p->addXp(xpGained)) {
+                dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
+            }
+        }
+        dmSay("The party gains " + std::to_string(xpGained) + " XP.");
+        roomCount_++;
+        spawnRoomContent();
+        generateRoomDescription();
+        rollInitiative();
+    } else if (!turnOrder_.empty()) {
+        if (currentTurnIndex_ >= static_cast<int>(turnOrder_.size())) {
+            currentTurnIndex_ = 0;
+        }
+    }
+}
+
+void Game::allyTurn() {
+    if (turnOrder_.empty()) return;
+    Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    if (!actor || actor->isDowned || actor->isDead) {
+        advanceTurn();
+        return;
+    }
+    if (enemies_.empty()) {
+        advanceTurn();
+        return;
+    }
+
+    int target = -1;
+    for (size_t i = 0; i < enemies_.size(); ++i) {
+        if (enemies_[i] && enemies_[i]->currentHp > 0 && !enemies_[i]->isDowned) {
+            target = static_cast<int>(i);
+            break;
+        }
+    }
+    if (target < 0) {
+        // Only corpses left — clean them up; initiative refresh happens inside.
+        purgeDownedEnemies();
+        return;
+    }
+
+    // Remember who is acting; playerAttack may no-op or rebuild without advancing.
+    const std::string actorUid = actor->uid;
+    const int roomBefore = roomCount_;
+    playerAttack(target);
+
+    // New room from a wipe: rollInitiative already picked the next actor.
+    if (roomCount_ != roomBefore) return;
+
+    Character* now = getCurrentActor();
+    if (now && now->uid == actorUid) {
+        // Attack no-op'd or kill-rebuild left this ally current — spend the turn.
+        advanceTurn();
+    }
+}
+
 void Game::processTurn() {
     if (gameOver_ || isMerchantRoom_ || turnOrder_.empty() || !isHost_) return;
 
@@ -350,9 +433,16 @@ void Game::processTurn() {
         return;
     }
 
+    bool isEnemy = std::find_if(enemies_.begin(), enemies_.end(),
+        [&](auto& e){ return e.get() == current; }) != enemies_.end();
+
+    // 0-HP foes still sitting in initiative look like "NPC turns that do nothing".
+    if (isEnemy && (current->isDowned || current->currentHp <= 0)) {
+        purgeDownedEnemies();
+        return;
+    }
+
     if (current->isDowned) {
-        bool isEnemy = false;
-        for (auto& e : enemies_) if (e.get() == current) isEnemy = true;
         if (!isEnemy) {
             // Stable PCs skip death saves until healed or damaged again.
             if (current->isStable) {
@@ -399,13 +489,19 @@ void Game::processTurn() {
         return;
     }
 
-    bool isEnemy = std::find_if(enemies_.begin(), enemies_.end(), [&](auto& e){ return e.get() == current; }) != enemies_.end();
     if (isEnemy) {
         enemyTurn();
-        advanceTurn();
-    } else if (current->name.find("(NPC)") != std::string::npos) {
-        playerAttack(0);
+        if (!gameOver_ && getCurrentActor() == current) {
+            advanceTurn();
+        }
+        return;
     }
+
+    if (isAllyAi(current)) {
+        allyTurn();
+        return;
+    }
+    // Otherwise it's a human-controlled hero — wait for UI input.
 }
 
 
@@ -457,11 +553,13 @@ bool Game::performWeaponAttack(Character* actor, Character& target, int atkVisIn
 }
 
 void Game::resolveEnemyDefeated(Character* actor, int /*targetEnemyIndex*/) {
-    // Remove dead enemies and advance dungeon
+    // Remove dead enemies and advance dungeon.
+    // Strip turnOrder_ entries BEFORE destroying the Character (no dangling pointers).
     for (auto it = enemies_.begin(); it != enemies_.end(); ) {
         if ((*it)->currentHp <= 0) {
             addJournalEntry("Defeated " + (*it)->name);
             dmSay("The " + (*it)->name + " falls. The dungeon grows quieter… for now.");
+            removeFromTurnOrder(it->get());
             it = enemies_.erase(it);
         } else ++it;
     }
@@ -489,6 +587,8 @@ void Game::resolveEnemyDefeated(Character* actor, int /*targetEnemyIndex*/) {
         rollInitiative();
     } else {
         rebuildTurnOrder();
+        // The attacker already spent their action on the killing blow — move on.
+        advanceTurn();
     }
 }
 
@@ -496,9 +596,9 @@ void Game::playerAttack(int targetEnemyIndex) {
     if (gameOver_ || enemies_.empty() || targetEnemyIndex < 0 || static_cast<size_t>(targetEnemyIndex) >= enemies_.size()) return;
     if (turnOrder_.empty()) return;
     Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->isDowned) return;
+    if (!actor || actor->isDowned || actor->isDead) return;
 
-    // Only player-controlled creatures use this button path
+    // Only party members (hero + NPC allies) use this attack path
     bool isPlayer = false;
     int playerIdx = 0;
     for (size_t i = 0; i < players_.size(); ++i) {
