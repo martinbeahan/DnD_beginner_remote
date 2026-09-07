@@ -73,6 +73,11 @@ class MainActivity : AppCompatActivity() {
     private var soloCoachEnabled = true
     /** True after Continue / New Game / Join — avoids wiping save in onPause before that. */
     private var sessionActive = false
+    /** True when this device is the online DM (authoritative). */
+    private var isOnlineHost = false
+    /** True when joined someone else's session. */
+    private var isOnlineClient = false
+    private var onlineSessionId = ""
 
     companion object {
         private const val NATIVE_LIB = "dndbeginnerremote"
@@ -160,13 +165,29 @@ class MainActivity : AppCompatActivity() {
         btnAttack.setOnClickListener { 
             Log.d(TAG, "Attack clicked")
             if (isMerchantRoom()) showShopDialog() 
-            else handleActionWithTarget("Attack") { i -> doAttack(i); animateAttack(true) } 
+            else handleActionWithTarget("Attack", isEnemy = true, actionType = "attack") { i ->
+                doAttack(i); animateAttack(true)
+            }
         }
         
-        btnSpecial.setOnClickListener { Log.d(TAG, "Special clicked"); handleActionWithTarget("Special") { i -> doSpecial(i); animateAttack(true) } }
-        btnHeal.setOnClickListener { Log.d(TAG, "Heal clicked"); handleActionWithTarget("Heal", false) { i -> doHeal(i) } }
-        btnInteract.setOnClickListener { Log.d(TAG, "Interact clicked"); doInteract(localPlayerName); syncAndSave() }
-        btnRest.setOnClickListener { Log.d(TAG, "Rest clicked"); doRest(); syncAndSave() }
+        btnSpecial.setOnClickListener {
+            Log.d(TAG, "Special clicked")
+            handleActionWithTarget("Special", isEnemy = true, actionType = "special") { i ->
+                doSpecial(i); animateAttack(true)
+            }
+        }
+        btnHeal.setOnClickListener {
+            Log.d(TAG, "Heal clicked")
+            handleActionWithTarget("Heal", isEnemy = false, actionType = "heal") { i -> doHeal(i) }
+        }
+        btnInteract.setOnClickListener {
+            Log.d(TAG, "Interact clicked")
+            performOrQueue("interact", 0) { doInteract(localPlayerName) }
+        }
+        btnRest.setOnClickListener {
+            Log.d(TAG, "Rest clicked")
+            performOrQueue("rest", 0) { doRest() }
+        }
 
         btnSendChat.setOnClickListener {
             val msg = chatInput.text.toString()
@@ -234,7 +255,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleActionWithTarget(title: String, isEnemy: Boolean = true, action: (Int) -> Unit) {
+
+    private fun performOrQueue(actionType: String, targetIndex: Int, localApply: () -> Unit) {
+        if (isOnlineClient) {
+            val mp = multiplayer
+            if (mp == null || !mp.isAvailable) {
+                Toast.makeText(this, "Not connected to the DM session.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            mp.pushAction(
+                mapOf(
+                    "type" to actionType,
+                    "targetIndex" to targetIndex,
+                    "playerName" to localPlayerName,
+                    "classId" to localClassId
+                )
+            )
+            Toast.makeText(this, "Sent to the DM…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        localApply()
+        syncAndSave()
+    }
+
+    private fun handleActionWithTarget(
+        title: String,
+        isEnemy: Boolean = true,
+        actionType: String,
+        action: (Int) -> Unit
+    ) {
         val status = getPlayerStatus()
         Log.d(TAG, "Targeting for $title. Status: $status")
         val targets = if (isEnemy) {
@@ -243,46 +292,135 @@ class MainActivity : AppCompatActivity() {
             status.lines().takeWhile { !it.contains("--- Foes ---") }.filter { it.contains("|") }
         }
 
-        if (targets.isEmpty()) { 
+        if (targets.isEmpty()) {
             Log.d(TAG, "No targets found for $title, using index 0")
-            action(0); syncAndSave(); return 
+            performOrQueue(actionType, 0) { action(0) }
+            return
         }
-        
+
         AlertDialog.Builder(this).setTitle("Select Target").setItems(targets.toTypedArray()) { _, which ->
             Log.d(TAG, "Target $which selected for $title")
-            action(which)
-            syncAndSave()
+            performOrQueue(actionType, which) { action(which) }
         }.show()
     }
 
-    private fun setupMultiplayer(id: String, isNewPlayer: Boolean = false, selectedClass: Int = 0) {
-        Log.d(TAG, "Setting up multiplayer for session: $id")
-        multiplayer = MultiplayerManager(id)
-        multiplayer?.listenForUpdates(object : MultiplayerManager.StateUpdateListener {
-            override fun onStateUpdated(data: String) {
-                if (data.isBlank() || isUpdatingFromRemote) return
+    private fun requireFirebaseOrToast(): Boolean {
+        val probe = MultiplayerManager("PROBE")
+        val ok = probe.isAvailable
+        probe.detach()
+        if (!ok) {
+            AlertDialog.Builder(this)
+                .setTitle("Firebase not configured")
+                .setMessage(
+                    "Online play needs Firebase Realtime Database.\n\n" +
+                        "Add app/google-services.json, uncomment the Google Services plugin in app/build.gradle.kts, " +
+                        "and follow FIREBASE_SETUP.md — then rebuild."
+                )
+                .setPositiveButton("OK", null)
+                .show()
+        }
+        return ok
+    }
+
+    private fun setupMultiplayer(id: String, asHost: Boolean) {
+        Log.d(TAG, "Setting up multiplayer session=$id asHost=$asHost")
+        multiplayer?.detach()
+        val mp = MultiplayerManager(id)
+        multiplayer = mp
+        onlineSessionId = id
+        isOnlineHost = asHost
+        isOnlineClient = !asHost
+
+        if (!mp.isAvailable) {
+            Toast.makeText(this, "Firebase unavailable — online session not connected.", Toast.LENGTH_LONG).show()
+            isOnlineHost = false
+            isOnlineClient = false
+            multiplayer = null
+            return
+        }
+
+        if (asHost) {
+            mp.publishMeta(localPlayerName, role = "dm")
+            mp.listenForActions { actionId, action ->
+                runOnUiThread {
+                    try {
+                        applyHostAction(action)
+                        mp.ackAction(actionId)
+                        syncAndSave()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "host action failed", e)
+                    }
+                }
+            }
+        }
+
+        mp.listenForUpdates { data ->
+            runOnUiThread {
+                if (data.isBlank() || isUpdatingFromRemote) return@runOnUiThread
+                // Host ignores echoes of its own publishes
+                if (isOnlineHost) {
+                    try {
+                        if (data == saveGameState()) return@runOnUiThread
+                    } catch (_: Exception) {}
+                }
                 try {
-                    val local = saveGameState()
-                    if (data == local) return
                     isUpdatingFromRemote = true
                     loadGameState(data)
-                    if (isNewPlayer && !getPlayerStatus().contains(localPlayerName)) {
-                        addRemoteAlly(selectedClass, localPlayerName)
-                        syncAndSave()
-                    }
+                    lastBattleRoster = ""
+                    lastRoomDesc = ""
+                    lastChatHistory = ""
+                    refreshBattleArena()
+                    updateUi()
                 } catch (e: Exception) {
                     Log.e(TAG, "remote state apply failed", e)
                 } finally {
                     isUpdatingFromRemote = false
                 }
             }
-        })
-        multiplayer?.listenForChat { msg ->
-            try {
-                if (!getChatHistory().contains(msg)) sendChatMessage("Remote", msg)
-            } catch (e: Exception) {
-                Log.w(TAG, "remote chat failed", e)
+        }
+
+        mp.listenForChat { msg ->
+            runOnUiThread {
+                try {
+                    if (!getChatHistory().contains(msg)) sendChatMessage("Remote", msg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "remote chat failed", e)
+                }
             }
+        }
+    }
+
+    private fun applyHostAction(action: Map<String, Any>) {
+        val type = action["type"]?.toString() ?: return
+        val player = action["playerName"]?.toString() ?: "Hero"
+        val target = (action["targetIndex"] as? Number)?.toInt()
+            ?: action["targetIndex"]?.toString()?.toIntOrNull()
+            ?: 0
+        val classId = (action["classId"] as? Number)?.toInt()
+            ?: action["classId"]?.toString()?.toIntOrNull()
+            ?: 0
+
+        when (type) {
+            "join" -> {
+                if (!getPlayerStatus().contains(player)) {
+                    addRemoteAlly(classId, player)
+                    try { sendChatMessage("DM", "$player has joined the party.") } catch (_: Exception) {}
+                    Toast.makeText(this, "$player joined the table.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            "attack" -> {
+                doAttack(target)
+                animateAttack(true)
+            }
+            "special" -> {
+                doSpecial(target)
+                animateAttack(true)
+            }
+            "heal" -> doHeal(target)
+            "rest" -> doRest()
+            "interact" -> doInteract(player)
+            "buy" -> doBuyItem(player, target)
+            else -> Log.w(TAG, "Unknown action type: $type")
         }
     }
 
@@ -295,13 +433,16 @@ class MainActivity : AppCompatActivity() {
                 .putString("hero_name", localPlayerName)
                 .putInt("hero_class", localClassId)
                 .putBoolean("crash_guard", false)
+                .putBoolean("was_online_host", isOnlineHost)
+                .putString("online_session_id", onlineSessionId)
                 .apply()
-            if (!isUpdatingFromRemote) {
+            // Only the DM/host publishes authoritative state
+            if (!isUpdatingFromRemote && isOnlineHost) {
                 try { multiplayer?.updateState(data) } catch (e: Exception) {
                     Log.w(TAG, "multiplayer update failed", e)
                 }
             }
-            lastBattleRoster = "" // force sprite/HP refresh
+            lastBattleRoster = ""
             refreshBattleArena()
         } catch (e: Exception) {
             Log.e(TAG, "syncAndSave failed", e)
@@ -337,8 +478,10 @@ class MainActivity : AppCompatActivity() {
         try {
             loadGameState(data)
             setHost(true)
-            // Solo continue — don't attach Firebase. Hosting/joining still uses setupMultiplayer.
+            isOnlineHost = false
+            isOnlineClient = false
             multiplayer = null
+            onlineSessionId = ""
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load save", e)
             Toast.makeText(this, "Save looked broken — start a new game.", Toast.LENGTH_LONG).show()
@@ -364,7 +507,7 @@ class MainActivity : AppCompatActivity() {
         btnReset.visibility = if (status.contains("Game Over")) View.VISIBLE else View.GONE
         refreshBattleArena()
         updateUi()
-        Toast.makeText(this, "Welcome back, $localPlayerName", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Welcome back, $localPlayerName (solo)", Toast.LENGTH_SHORT).show()
     }
 
     private fun showStartDialog() {
@@ -376,69 +519,132 @@ class MainActivity : AppCompatActivity() {
         val saved = savedState()
         val defaultName = saved?.let { heroNameFromSave(it) } ?: prefs().getString("hero_name", null)
         val nameInput = EditText(this).apply {
-            hint = "Enter Hero Name"
+            hint = "Your name"
             if (!defaultName.isNullOrBlank()) setText(defaultName)
         }
         layout.addView(nameInput)
 
-        val builder = AlertDialog.Builder(this)
-            .setTitle("D&D Remote Multiplayer")
+        val modes = mutableListOf<String>()
+        if (saved != null) modes += "Continue solo save (${heroNameFromSave(saved)})"
+        modes += "Solo adventure"
+        modes += "Host online (you are the DM)"
+        modes += "Join session"
+
+        AlertDialog.Builder(this)
+            .setTitle("D&D Beginner")
             .setView(layout)
             .setCancelable(false)
-
-        if (saved != null) {
-            builder.setMessage("A saved adventure was found for ${heroNameFromSave(saved)}.")
-            builder.setPositiveButton("Continue") { _, _ ->
-                continueSavedGame()
-            }
-            builder.setNeutralButton("New Game") { _, _ ->
+            .setItems(modes.toTypedArray()) { _, which ->
+                val label = modes[which]
                 localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
-                showClassSelection(isNewGame = true)
+                when {
+                    label.startsWith("Continue") -> continueSavedGame()
+                    label.startsWith("Solo") -> showClassSelection(mode = "solo")
+                    label.startsWith("Host") -> {
+                        if (!requireFirebaseOrToast()) {
+                            showStartDialog()
+                            return@setItems
+                        }
+                        showClassSelection(mode = "host")
+                    }
+                    label.startsWith("Join") -> {
+                        if (!requireFirebaseOrToast()) {
+                            showStartDialog()
+                            return@setItems
+                        }
+                        showJoinDialog()
+                    }
+                }
             }
-            builder.setNegativeButton("Join Session") { _, _ ->
-                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
-                showJoinDialog()
-            }
-        } else {
-            builder.setPositiveButton("New Game") { _, _ ->
-                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
-                showClassSelection(isNewGame = true)
-            }
-            builder.setNegativeButton("Join Session") { _, _ ->
-                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
-                showJoinDialog()
-            }
-        }
-        builder.show()
+            .show()
     }
 
-    private fun showClassSelection(isNewGame: Boolean, sid: String = "") {
+    private fun showClassSelection(mode: String, sid: String = "") {
         val classes = arrayOf("Fighter", "Wizard", "Rogue", "Cleric")
-        AlertDialog.Builder(this).setTitle("Choose Your Role").setItems(classes) { _, which ->
-            Log.d(TAG, "Class $which selected. NewGame=$isNewGame")
+        val title = when (mode) {
+            "host" -> "DM character (you still sit at the table)"
+            "join" -> "Choose your class"
+            else -> "Choose your class"
+        }
+        AlertDialog.Builder(this).setTitle(title).setItems(classes) { _, which ->
+            Log.d(TAG, "Class $which selected. mode=$mode")
             localClassId = which
-            if (isNewGame) {
-                resetGame(which, localPlayerName)
-                setHost(true)
-                multiplayer = null // solo by default; Join Session wires Firebase
-                maybeOfferTutorialThenCoach()
-            } else {
-                setHost(false)
-                setupMultiplayer(sid, isNewPlayer = true, selectedClass = which)
+            when (mode) {
+                "solo" -> {
+                    resetGame(which, localPlayerName)
+                    setHost(true)
+                    isOnlineHost = false
+                    isOnlineClient = false
+                    multiplayer = null
+                    onlineSessionId = ""
+                    maybeOfferTutorialThenCoach()
+                    sessionActive = true
+                    btnReset.visibility = View.GONE
+                    syncAndSave()
+                    updateUi()
+                }
+                "host" -> {
+                    resetGame(which, localPlayerName)
+                    setHost(true)
+                    sessionActive = true
+                    btnReset.visibility = View.GONE
+                    val sidNow = try { getSessionId() } catch (_: Exception) { "" }
+                    setupMultiplayer(sidNow, asHost = true)
+                    syncAndSave()
+                    updateUi()
+                    maybeOfferTutorialThenCoach()
+                    showSessionShareDialog()
+                }
+                "join" -> {
+                    setHost(false)
+                    sessionActive = true
+                    btnReset.visibility = View.GONE
+                    setupMultiplayer(sid, asHost = false)
+                    // Ask the DM to add us to the party
+                    multiplayer?.pushAction(
+                        mapOf(
+                            "type" to "join",
+                            "playerName" to localPlayerName,
+                            "classId" to which,
+                            "targetIndex" to 0
+                        )
+                    )
+                    updateUi()
+                    Toast.makeText(this, "Joining $sid — waiting for the DM…", Toast.LENGTH_LONG).show()
+                }
             }
-            sessionActive = true
-            btnReset.visibility = View.GONE
-            syncAndSave()
-            updateUi()
-        }.show()
+        }.setNegativeButton("Back") { _, _ -> showStartDialog() }.show()
     }
 
     private fun showJoinDialog() {
-        val input = EditText(this).apply { hint = "Enter Session ID (e.g. DND-A1B2)" }
-        AlertDialog.Builder(this).setTitle("Join Ally").setView(input).setPositiveButton("Join") { _, _ ->
-            val sid = input.text.toString().uppercase()
-            if (sid.isNotEmpty()) showClassSelection(isNewGame = false, sid = sid)
-        }.setNegativeButton("Back") { _, _ -> showStartDialog() }.show()
+        val input = EditText(this).apply { hint = "Session ID (e.g. DND-A1B2)" }
+        AlertDialog.Builder(this).setTitle("Join DM session").setView(input)
+            .setPositiveButton("Join") { _, _ ->
+                val sid = input.text.toString().trim().uppercase()
+                if (sid.isNotEmpty()) showClassSelection(mode = "join", sid = sid)
+                else showStartDialog()
+            }
+            .setNegativeButton("Back") { _, _ -> showStartDialog() }
+            .show()
+    }
+
+    private fun showSessionShareDialog() {
+        val sid = onlineSessionId.ifBlank {
+            try { getSessionId() } catch (_: Exception) { "" }
+        }
+        if (sid.isBlank()) return
+        val clip = android.content.ClipData.newPlainText("DND_SESSION", sid)
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+        AlertDialog.Builder(this)
+            .setTitle("You are the DM")
+            .setMessage(
+                "Session ID:\n\n$sid\n\n" +
+                    "Share this code with friends. They tap Join session and enter it.\n\n" +
+                    "You control the world (enemy turns & saves). Their actions are sent to you.\n\n" +
+                    "(Copied to clipboard.)"
+            )
+            .setPositiveButton("Got it", null)
+            .show()
     }
 
     private fun showCharacterSheet() {
@@ -484,8 +690,7 @@ class MainActivity : AppCompatActivity() {
             .setItems(labels) { _, which ->
                 val entry = entries[which]
                 val index = entry.substringBefore(':').toIntOrNull() ?: which
-                doBuyItem(localPlayerName, index)
-                syncAndSave()
+                performOrQueue("buy", index) { doBuyItem(localPlayerName, index) }
                 Toast.makeText(this, "Bought ${labels[which]}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Leave", null)
@@ -538,12 +743,21 @@ class MainActivity : AppCompatActivity() {
         val myTurnBanner = whose.equals(localPlayerName, ignoreCase = true) ||
             whose.equals("You", ignoreCase = true)
         turnBanner.text = when {
+            isOnlineHost && isShop -> "DM · merchant"
+            isOnlineHost && status.contains("Game Over", ignoreCase = true) -> "DM · defeat…"
+            isOnlineHost && myTurnBanner -> "DM · your move"
+            isOnlineHost -> "DM · $whose"
             isShop -> "Safe haven — merchant"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
             myTurnBanner -> "Your move, $localPlayerName"
             else -> "$whose acts…"
         }
-        statusText.text = roomLine.substringBefore("|").trim().ifBlank { roomLine }
+        val roomBit = roomLine.substringBefore("|").trim().ifBlank { roomLine }
+        statusText.text = when {
+            isOnlineHost && onlineSessionId.isNotBlank() -> "$roomBit · ID $onlineSessionId"
+            isOnlineClient && onlineSessionId.isNotBlank() -> "$roomBit · joined $onlineSessionId"
+            else -> roomBit
+        }
 
         val specialName = try { getSpecialName() } catch (_: Exception) { "Special" }
         // Two-line labels so text stays visible on narrow / large-font screens
