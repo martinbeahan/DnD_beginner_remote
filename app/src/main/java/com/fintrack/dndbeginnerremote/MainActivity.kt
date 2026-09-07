@@ -430,7 +430,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val st = getPlayerStatus()
             if (st.contains("Game Over", ignoreCase = true)) {
-                Toast.makeText(this, "Game Over — start a new adventure.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Game Over — tap Menu, then Solo adventure.", Toast.LENGTH_LONG).show()
                 btnReset.visibility = View.VISIBLE
                 clearSave("blocked action after death")
                 return

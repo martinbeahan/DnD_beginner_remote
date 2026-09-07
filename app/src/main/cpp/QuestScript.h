@@ -83,7 +83,7 @@ inline const QuestBeatScript kAshenLanternBeats[] = {
         "Lantern Vault",
         "The vault chamber opens on a stone plinth. The Ashen Lantern rests there — cold iron, grey glass, "
         "still faintly warm. Something large shifts in the dark beyond the plinth.",
-        "There — the Ashen Lantern. Claim it, but the vault does not give gifts freely.",
+        "There — the Ashen Lantern. A Skeleton Champion guards it — watch for one brutal surge, then claim the light.",
         "The party found the Lantern Vault and the stolen Ashen Lantern."
     },
     {

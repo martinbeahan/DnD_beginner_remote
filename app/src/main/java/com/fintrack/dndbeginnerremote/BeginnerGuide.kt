@@ -90,7 +90,7 @@ object BeginnerGuide {
             return "DM: Safe room. Tap Shop to buy gear, or Leave/Short Rest area controls to move on."
         }
         if (status.contains("Game Over", ignoreCase = true)) {
-            return "DM: The party has fallen. Tap Reset to begin a new adventure."
+            return "DM: The party has fallen. Tap Menu, then Solo adventure to begin again (this save is cleared)."
         }
         val turnMarker = "Turn: "
         val turnLine = status.lineSequence().firstOrNull { it.contains(turnMarker) } ?: return null
