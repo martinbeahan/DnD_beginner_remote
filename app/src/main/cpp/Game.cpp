@@ -954,7 +954,10 @@ void Game::enemyTurn() {
             bool wasDowned = hero.isDowned || hero.isStable;
             hero.takeDamage(dmg, wasDowned && result.isCriticalHit);
             pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
-            lastEvent_ = enemy->name + " attacks " + hero.name + " for " + std::to_string(dmg) + " damage!";
+            lastEvent_ = enemy->name + " attacks " + hero.name + "! d20=" + std::to_string(result.dieRoll)
+                + " = " + std::to_string(result.total) + " vs AC " + std::to_string(hero.armorClass)
+                + ". " + (result.isCriticalHit ? "CRITICAL HIT! " : "Hit! ")
+                + "Damage " + std::to_string(dmg) + ".";
             if (sneak) lastEvent_ += " (Sneak Attack)";
             addChatMessage("Combat", lastEvent_);
             if (hero.isDead) {
@@ -968,7 +971,8 @@ void Game::enemyTurn() {
                      (result.isCriticalHit ? " (critical — two failures)!" : "."));
             }
         } else {
-            lastEvent_ = enemy->name + " misses " + hero.name + "!";
+            lastEvent_ = enemy->name + " attacks " + hero.name + "! d20=" + std::to_string(result.dieRoll)
+                + " = " + std::to_string(result.total) + " vs AC " + std::to_string(hero.armorClass) + ". Miss!";
             addChatMessage("Combat", lastEvent_);
         }
         return hero.isDead;

@@ -222,9 +222,13 @@ struct Character {
         ss << "Lvl " << level << " " << getClassName() << " | Gold: " << gold << "\n";
         if (pendingStatPoints > 0) ss << "POINTS TO SPEND: " << pendingStatPoints << "\n";
         ss << "HP: " << currentHp << "/" << maxHp << " | AC: " << armorClass << "\n";
+        ss << "Resources: " << resources << "/" << maxResources << "\n";
         ss << "STR: " << attributes.strength << " (" << showMod(attributes.strength) << ")\n";
         ss << "DEX: " << attributes.dexterity << " (" << showMod(attributes.dexterity) << ")\n";
+        ss << "CON: " << attributes.constitution << " (" << showMod(attributes.constitution) << ")\n";
         ss << "INT: " << attributes.intelligence << " (" << showMod(attributes.intelligence) << ")\n";
+        ss << "WIS: " << attributes.wisdom << " (" << showMod(attributes.wisdom) << ")\n";
+        ss << "CHA: " << attributes.charisma << " (" << showMod(attributes.charisma) << ")\n";
         ss << "Weapon: " << (equippedWeapon ? equippedWeapon->getDescription() : "None") << "\n";
         ss << "Armor: " << (equippedArmor ? equippedArmor->getDescription() : "None") << "\n";
         return ss.str();
