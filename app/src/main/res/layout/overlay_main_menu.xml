@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mainMenuRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/dungeon_bg"
+    android:clickable="true"
+    android:focusable="true"
+    android:visibility="gone">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_parchment"
+            android:padding="20dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:id="@+id/mainMenuTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:fontFamily="serif"
+                android:text="D&amp;D Beginner"
+                android:textColor="@color/ink"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                android:id="@+id/mainMenuSubtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:fontFamily="serif"
+                android:text="Choose your path"
+                android:textColor="@color/ink"
+                android:textSize="13sp"
+                android:textStyle="italic"
+                android:paddingBottom="16dp" />
+
+            <Button
+                android:id="@+id/btnMenuContinue"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_marginBottom="8dp"
+                android:text="Continue"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btnMenuSolo"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_marginBottom="8dp"
+                android:text="Solo adventure"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnMenuHost"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_marginBottom="8dp"
+                android:text="Host online (DM)"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnMenuJoin"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_marginBottom="8dp"
+                android:text="Join session"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnMenuSettings"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_marginBottom="8dp"
+                android:text="Settings"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnMenuQuit"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:text="Quit (background)"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

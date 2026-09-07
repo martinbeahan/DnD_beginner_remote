@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#CC1A1410"
+    android:clickable="true"
+    android:focusable="true"
+    android:visibility="gone">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_dungeon_panel"
+            android:padding="16dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Settings"
+                android:textColor="@color/gold"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:paddingBottom="12dp" />
+
+            <CheckBox
+                android:id="@+id/chkBeginnerTips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Show beginner tips / coach"
+                android:textColor="@color/parchment"
+                android:buttonTint="@color/gold"
+                android:paddingBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/chkSound"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Sound on (no audio yet — stub)"
+                android:textColor="@color/parchment"
+                android:buttonTint="@color/gold"
+                android:paddingBottom="8dp" />
+
+            <Button
+                android:id="@+id/btnSettingsTutorial"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_marginBottom="8dp"
+                android:text="Replay tutorial"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnSettingsAbandon"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_marginBottom="8dp"
+                android:text="Leave / abandon adventure"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/settingsAboutText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="8dp"
+                android:paddingBottom="12dp"
+                android:gravity="center"
+                android:textColor="@color/parchment_dark"
+                android:textSize="12sp"
+                android:text="About" />
+
+            <Button
+                android:id="@+id/btnSettingsClose"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Close"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>
