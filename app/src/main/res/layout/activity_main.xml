@@ -116,44 +116,73 @@
         android:maxLines="3"
         android:ellipsize="end" />
 
-    <!-- Battle stage (main focus) -->
-    <LinearLayout
-        android:id="@+id/battleArena"
+    <!-- Battle stage (main focus) + FX overlay for floating damage -->
+    <FrameLayout
+        android:id="@+id/battleStageHost"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_below="@id/roomDescText"
         android:layout_above="@id/bottomControls"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
-        android:orientation="horizontal"
-        android:padding="12dp"
-        android:gravity="center"
-        android:background="@drawable/bg_battle_stage">
+        android:layout_marginBottom="8dp">
 
         <LinearLayout
-            android:id="@+id/partyColumn"
-            android:layout_width="0dp"
+            android:id="@+id/battleArena"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_vertical|start" />
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:gravity="center"
+            android:background="@drawable/bg_battle_stage"
+            android:clipChildren="false"
+            android:clipToPadding="false">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="VS"
-            android:textSize="22sp"
-            android:textColor="@color/gold"
-            android:padding="6dp" />
+            <LinearLayout
+                android:id="@+id/partyColumn"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center_vertical|start"
+                android:clipChildren="false" />
 
-        <LinearLayout
-            android:id="@+id/enemyColumn"
-            android:layout_width="0dp"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="VS"
+                android:textSize="22sp"
+                android:textColor="@color/gold"
+                android:padding="6dp" />
+
+            <LinearLayout
+                android:id="@+id/enemyColumn"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center_vertical|end"
+                android:clipChildren="false" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/battleFxOverlay"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_vertical|end" />
-    </LinearLayout>
+            android:clickable="false"
+            android:focusable="false"
+            android:importantForAccessibility="no" />
+
+        <View
+            android:id="@+id/combatFlashOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#00FFFFFF"
+            android:visibility="gone"
+            android:clickable="false"
+            android:focusable="false"
+            android:importantForAccessibility="no" />
+    </FrameLayout>
+
 
     <!-- Bottom: actions + slim event ticker -->
     <LinearLayout

@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -47,6 +48,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var partyColumn: LinearLayout
     private lateinit var enemyColumn: LinearLayout
     private lateinit var battleArena: LinearLayout
+    private var battleFxOverlay: FrameLayout? = null
+    private var combatFlashOverlay: View? = null
     private var lastBattleBgKey = ""
     
     private var multiplayer: MultiplayerManager? = null
@@ -242,6 +245,8 @@ class MainActivity : AppCompatActivity() {
         partyColumn = findViewById(R.id.partyColumn)
         enemyColumn = findViewById(R.id.enemyColumn)
         battleArena = findViewById(R.id.battleArena)
+        battleFxOverlay = findViewById(R.id.battleFxOverlay)
+        combatFlashOverlay = findViewById(R.id.combatFlashOverlay)
         wireDiceOverlay()
         wireMainMenuAndSettings()
 
@@ -1224,9 +1229,9 @@ class MainActivity : AppCompatActivity() {
         settingsAboutText.text =
             getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
                 "\n\nCompatible with 5e SRD (SRD 5.1, CC-BY 4.0). Not an official D&D product. " +
-                "See ATTRIBUTION.md.\n\nArt (CC0): LuizMelo character/monster packs; Nidhoggn battle " +
-                "backgrounds; ansimuz Phantasy dungeon; quantumelle Dark forest path; Clint Bellanger " +
-                "Tiny Creatures (ogre).\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
+                "See ATTRIBUTION.md.\n\nArt (CC0): LuizMelo idle/attack frames; Nidhoggn battlebacks " +
+                "(Act 2 + crawl variety); ansimuz Phantasy dungeon; quantumelle Dark forest path; " +
+                "Clint Bellanger Tiny Creatures (ogre).\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
                 "StarNinjas sword/clash SFX; Darsycho monster snarl; bart interface beep. " +
                 "DM voice uses on-device Text-to-Speech (no third-party voices)."
         settingsRoot.visibility = View.VISIBLE
@@ -2017,7 +2022,7 @@ class MainActivity : AppCompatActivity() {
             return when {
                 n.contains("skeleton") -> R.drawable.sprite_skeleton
                 n.contains("wolf") -> R.drawable.sprite_wolf
-                n.contains("ogre") -> R.drawable.sprite_ogre
+                n.contains("ogre") || n.contains("collector") -> R.drawable.sprite_ogre
                 else -> R.drawable.sprite_goblin
             }
         }
@@ -2030,25 +2035,59 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Quest-beat / room-type battle backdrop (CC0 art). */
+    private fun attackSpriteFor(idleRes: Int): Int {
+        return when (idleRes) {
+            R.drawable.sprite_fighter -> R.drawable.sprite_fighter_atk
+            R.drawable.sprite_wizard -> R.drawable.sprite_wizard_atk
+            R.drawable.sprite_rogue -> R.drawable.sprite_rogue_atk
+            R.drawable.sprite_cleric -> R.drawable.sprite_cleric_atk
+            R.drawable.sprite_goblin -> R.drawable.sprite_goblin_atk
+            R.drawable.sprite_skeleton -> R.drawable.sprite_skeleton_atk
+            R.drawable.sprite_wolf -> R.drawable.sprite_wolf_atk
+            R.drawable.sprite_ogre -> R.drawable.sprite_ogre_atk
+            else -> idleRes
+        }
+    }
+
+    /** Quest-beat / room-type battle backdrop (CC0 art) — Act 2 + crawl variety. */
     private fun refreshBattleBackground() {
         if (!::battleArena.isInitialized) return
         val status = try { getPlayerStatus() } catch (_: Exception) { "" }
         val room = try { getRoomDescription() } catch (_: Exception) { "" }
         val blob = (status + "\n" + room).lowercase()
         val res = when {
-            blob.contains("millhollow green") || blob.contains("debt settled") ->
+            // Act 2 — Millhollow's Debt
+            blob.contains("millrace") || blob.contains("weir") ->
+                R.drawable.bg_battle_stage_weir
+            blob.contains("flooded cellar") || blob.contains("flooded") ->
+                R.drawable.bg_battle_stage_flooded
+            blob.contains("ledger loft") || blob.contains("loft") ->
+                R.drawable.bg_battle_stage_loft
+            blob.contains("collector's hall") || blob.contains("collectors hall") ||
+                (blob.contains("collector") && blob.contains("hall")) ->
+                R.drawable.bg_battle_stage_hall
+            blob.contains("debt settled") || blob.contains("millhollow green") ->
                 R.drawable.bg_battle_stage_road
-            blob.contains("millhollow") && !blob.contains("debt") -> R.drawable.bg_battle_stage_road
-            blob.contains("thornpath") || blob.contains("woods") || blob.contains("forest") ||
-                blob.contains("millrace") || blob.contains("weir") ->
+            // Act 1
+            blob.contains("millhollow") && !blob.contains("debt") ->
+                R.drawable.bg_battle_stage_road
+            blob.contains("thornpath") || blob.contains("woods") || blob.contains("forest") ->
                 R.drawable.bg_battle_stage_woods
-            blob.contains("bone gallery") || blob.contains("crypt") || blob.contains("flooded cellar") ->
+            blob.contains("bone gallery") || blob.contains("crypt") ->
                 R.drawable.bg_battle_stage_crypt
-            blob.contains("lantern vault") || blob.contains("ashen shrine") ||
-                blob.contains("ledger loft") || blob.contains("collector") ||
-                blob.contains("vault") || blob.contains("shrine") ->
+            blob.contains("lantern vault") || blob.contains("vault") ->
                 R.drawable.bg_battle_stage_vault
+            blob.contains("ashen shrine") || blob.contains("shrine") || blob.contains("ruins") ->
+                R.drawable.bg_battle_stage_ruins
+            // Crawl / procedural variety from room nouns
+            blob.contains("library") || blob.contains("laboratory") ->
+                R.drawable.bg_battle_stage_loft
+            blob.contains("hallway") || blob.contains("corridor") || blob.contains("cave") ->
+                R.drawable.bg_battle_stage_cave
+            blob.contains("merchant") ->
+                R.drawable.bg_battle_stage_road
+            blob.contains("chamber") ->
+                R.drawable.bg_battle_stage_dungeon
             else -> R.drawable.bg_battle_stage_dungeon
         }
         val key = res.toString()
@@ -2107,11 +2146,15 @@ class MainActivity : AppCompatActivity() {
                 setPadding(6, 6, 6, 6)
                 tag = unit.name
             }
+            val idleRes = spriteFor(unit)
             val img = ImageView(this).apply {
-                setImageResource(spriteFor(unit))
+                setImageResource(idleRes)
+                setTag(R.id.sheetPortrait, idleRes)
                 layoutParams = LinearLayout.LayoutParams(spriteSize, spriteSize)
                 adjustViewBounds = true
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                setPadding(6, 6, 6, 6)
+                background = getDrawable(R.drawable.bg_portrait_frame)
                 tag = "sprite"
                 // Party on left faces right (native); foes on right face left toward the party.
                 scaleX = if (isEnemyColumn) -1f else 1f
@@ -2252,7 +2295,8 @@ class MainActivity : AppCompatActivity() {
         targetEnemyIndex: Int? = null,
         targetAllyIndex: Int? = null,
         attackerName: String? = null,
-        critical: Boolean = false
+        critical: Boolean = false,
+        damageAmount: Int? = null
     ) {
         val attackerCol = if (attackerIsPlayer) partyColumn else enemyColumn
         val defenderCol = if (attackerIsPlayer) enemyColumn else partyColumn
@@ -2274,6 +2318,11 @@ class MainActivity : AppCompatActivity() {
         }
         val facing = if (a.scaleX < 0f) -1f else 1f
         val dx = (if (attackerIsPlayer) 128f else -128f)
+        // Swap to attack frame briefly (idle restored after lunge).
+        val idleRes = (a.getTag(R.id.sheetPortrait) as? Int) ?: 0
+        if (idleRes != 0) {
+            a.setImageResource(attackSpriteFor(idleRes))
+        }
         a.animate().cancel()
         a.translationX = 0f
         a.animate()
@@ -2281,23 +2330,32 @@ class MainActivity : AppCompatActivity() {
             .setDuration(110)
             .setInterpolator(AccelerateDecelerateInterpolator())
             .withEndAction {
-                a.animate().translationX(0f).setDuration(160).start()
+                a.animate().translationX(0f).setDuration(160).withEndAction {
+                    if (idleRes != 0) a.setImageResource(idleRes)
+                }.start()
                 defendView?.let { d ->
                     flashHit(d, critical)
                     val baseSx = d.scaleX.let { if (it == 0f) facing else it.coerceIn(-2f, 2f) }
-                    // Preserve mirrored facing on foes while pulsing impact.
                     val sign = if (baseSx < 0f) -1f else 1f
-                    val impact = if (critical) 1.38f else 1.22f
+                    val impact = if (critical) 1.42f else 1.24f
                     d.animate().cancel()
                     d.animate()
                         .scaleX(sign * impact).scaleY(impact)
-                        .setDuration(if (critical) 110 else 85)
+                        .setDuration(if (critical) 120 else 90)
                         .withEndAction {
                             d.animate()
                                 .scaleX(sign).scaleY(1f)
-                                .setDuration(150)
+                                .setDuration(160)
                                 .start()
                         }.start()
+                    if (damageAmount != null && damageAmount > 0) {
+                        spawnFloatingDamage(d, damageAmount, critical)
+                        flashScreen(critical)
+                    } else if (critical) {
+                        flashScreen(true)
+                    }
+                } ?: run {
+                    if (critical) flashScreen(true)
                 }
             }.start()
     }
@@ -2308,7 +2366,66 @@ class MainActivity : AppCompatActivity() {
         target.animate().cancel()
         handler.postDelayed({
             target.clearColorFilter()
-        }, if (critical) 160L else 110L)
+        }, if (critical) 180L else 120L)
+    }
+
+    private fun flashScreen(critical: Boolean) {
+        val overlay = combatFlashOverlay ?: return
+        val color = if (critical) Color.parseColor("#AAFFE08A") else Color.parseColor("#66FF4433")
+        overlay.setBackgroundColor(color)
+        overlay.visibility = View.VISIBLE
+        overlay.alpha = if (critical) 0.85f else 0.55f
+        overlay.animate().cancel()
+        overlay.animate()
+            .alpha(0f)
+            .setDuration(if (critical) 280L else 180L)
+            .withEndAction {
+                overlay.visibility = View.GONE
+                overlay.alpha = 1f
+            }
+            .start()
+    }
+
+    /** Floating damage number over defender — does not intercept taps. */
+    private fun spawnFloatingDamage(anchor: View, amount: Int, critical: Boolean) {
+        val host = battleFxOverlay ?: return
+        val density = resources.displayMetrics.density
+        val locHost = IntArray(2)
+        val locAnchor = IntArray(2)
+        host.getLocationOnScreen(locHost)
+        anchor.getLocationOnScreen(locAnchor)
+        val tv = TextView(this).apply {
+            text = if (critical) "CRIT $amount" else "-$amount"
+            setTextColor(if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFFEEEE"))
+            textSize = if (critical) 22f else 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setShadowLayer(4f * density, 0f, 0f, Color.BLACK)
+            background = getDrawable(R.drawable.bg_damage_float)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            isClickable = false
+            isFocusable = false
+        }
+        val lp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+        host.addView(tv, lp)
+        val maxX = (host.width - 48).coerceAtLeast(0).toFloat()
+        tv.x = (locAnchor[0] - locHost[0] + anchor.width / 4f).coerceIn(0f, maxX)
+        tv.y = (locAnchor[1] - locHost[1]).toFloat().coerceAtLeast(0f)
+        tv.alpha = 1f
+        tv.scaleX = if (critical) 1.15f else 1f
+        tv.scaleY = tv.scaleX
+        tv.animate()
+            .translationY(-72f * density)
+            .alpha(0f)
+            .scaleX(if (critical) 1.35f else 1.1f)
+            .scaleY(if (critical) 1.35f else 1.1f)
+            .setDuration(if (critical) 900L else 700L)
+            .withEndAction {
+                host.removeView(tv)
+            }
+            .start()
     }
 
     private fun maybeAnimateFromEvent(event: String) {
@@ -2317,19 +2434,21 @@ class MainActivity : AppCompatActivity() {
         val e = event.lowercase()
         when {
             e.contains("attacks") || e.contains("hits") || e.contains("slashes") || e.contains("fireball") || e.contains("sneak") || e.contains("action surge") || e.contains("magic missile") -> {
-                // Prefer "Attacker attacks Target" so downed local heroes are not animated as attackers.
                 val attackMatch = Regex("""^(.+?)\s+attacks\s+(.+?)(?:!|\.|$)""", RegexOption.IGNORE_CASE)
                     .find(event.trim())
                 val attackerName = attackMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
-                val foeNames = listOf("goblin", "skeleton", "wolf", "ogre")
+                val foeNames = listOf("goblin", "skeleton", "wolf", "ogre", "collector")
                 val attackerIsFoe = foeNames.any { attackerName.lowercase().contains(it) } ||
                     (attackerName.isBlank() && foeNames.any { e.contains(it) } &&
                         !e.startsWith(localPlayerName.lowercase()))
                 val isCrit = e.contains("critical")
+                val dmg = Regex("""(?i)(?:Damage|deal(?:s)?|for)\s+(\d+)""").find(event)
+                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
                 animateAttack(
                     attackerIsPlayer = !attackerIsFoe,
                     attackerName = attackerName.ifBlank { null },
-                    critical = isCrit
+                    critical = isCrit,
+                    damageAmount = dmg
                 )
                 if (attackerIsFoe) {
                     gameAudio?.playGrowl()
@@ -2343,6 +2462,17 @@ class MainActivity : AppCompatActivity() {
             }
             e.contains("damage") || e.contains("struck") || e.contains("wounded") -> {
                 gameAudio?.playHit()
+                val dmg = Regex("""(?i)(?:Damage|deal(?:s)?|for)\s+(\d+)""").find(event)
+                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                val isCrit = e.contains("critical")
+                if (dmg != null && dmg > 0) {
+                    val target = firstSprite(partyColumn) ?: firstSprite(enemyColumn)
+                    if (target != null) {
+                        spawnFloatingDamage(target, dmg, isCrit)
+                        flashScreen(isCrit)
+                        flashHit(target, isCrit)
+                    }
+                }
             }
         }
     }
@@ -2421,10 +2551,12 @@ class MainActivity : AppCompatActivity() {
         root.scaleY = 0.92f
         root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(130).start()
         if (crit) {
-            diceTitle?.animate()?.scaleX(1.12f)?.scaleY(1.12f)?.setDuration(90)
+            diceTitle?.setTextColor(Color.parseColor("#FFFFE08A"))
+            diceTitle?.animate()?.scaleX(1.2f)?.scaleY(1.2f)?.setDuration(100)
                 ?.withEndAction {
-                    diceTitle?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(90)?.start()
+                    diceTitle?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(100)?.start()
                 }?.start()
+            flashScreen(true)
         }
         diceHideRunnable?.let { handler.removeCallbacks(it) }
         val holdMs = 1400L
