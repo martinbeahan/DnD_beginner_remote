@@ -70,12 +70,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mainMenuSubtitle: TextView
     private lateinit var settingsRoot: View
     private lateinit var chkBeginnerTips: CheckBox
-    private lateinit var chkSound: CheckBox
+    private lateinit var chkMusic: CheckBox
+    private lateinit var chkSfx: CheckBox
+    private lateinit var chkDmVoice: CheckBox
     private lateinit var btnSettingsTutorial: Button
     private lateinit var btnSettingsAbandon: Button
     private lateinit var btnSettingsClose: Button
     private lateinit var settingsAboutText: TextView
-    private var soundEnabled = false
+    // Audio stubs — prefs only until a later audio PR wires playback/TTS.
+    private var musicEnabled = true
+    private var sfxEnabled = true
+    private var dmVoiceEnabled = false
     private val handler = Handler(Looper.getMainLooper())
     private var uiLoopStarted = false
     private val uiTick = object : Runnable {
@@ -279,7 +284,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         soloCoachEnabled = prefs().getBoolean("solo_coach_enabled", true)
-        soundEnabled = prefs().getBoolean("sound_enabled", false)
+        musicEnabled = prefs().getBoolean("pref_music_enabled", true)
+        sfxEnabled = prefs().getBoolean("pref_sfx_enabled", true)
+        dmVoiceEnabled = prefs().getBoolean("pref_dm_voice_enabled", false)
 
         // Only wipe when a prior *active* session exited uncleanly (crash_guard left true).
         // Do NOT arm crash_guard merely because the start dialog is shown.
@@ -910,7 +917,9 @@ class MainActivity : AppCompatActivity() {
 
         settingsRoot = findViewById(R.id.settingsRoot)
         chkBeginnerTips = findViewById(R.id.chkBeginnerTips)
-        chkSound = findViewById(R.id.chkSound)
+        chkMusic = findViewById(R.id.chkMusic)
+        chkSfx = findViewById(R.id.chkSfx)
+        chkDmVoice = findViewById(R.id.chkDmVoice)
         btnSettingsTutorial = findViewById(R.id.btnSettingsTutorial)
         btnSettingsAbandon = findViewById(R.id.btnSettingsAbandon)
         btnSettingsClose = findViewById(R.id.btnSettingsClose)
@@ -954,10 +963,17 @@ class MainActivity : AppCompatActivity() {
             soloCoachEnabled = checked
             prefs().edit().putBoolean("solo_coach_enabled", checked).apply()
         }
-        chkSound.setOnCheckedChangeListener { _, checked ->
-            soundEnabled = checked
-            prefs().edit().putBoolean("sound_enabled", checked).apply()
-            // No audio engine yet — preference is persisted for a future pass.
+        chkMusic.setOnCheckedChangeListener { _, checked ->
+            musicEnabled = checked
+            prefs().edit().putBoolean("pref_music_enabled", checked).apply()
+        }
+        chkSfx.setOnCheckedChangeListener { _, checked ->
+            sfxEnabled = checked
+            prefs().edit().putBoolean("pref_sfx_enabled", checked).apply()
+        }
+        chkDmVoice.setOnCheckedChangeListener { _, checked ->
+            dmVoiceEnabled = checked
+            prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
         }
         btnSettingsTutorial.setOnClickListener {
             hideSettingsOverlay()
@@ -970,16 +986,28 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsOverlay() {
         if (!::settingsRoot.isInitialized) return
         chkBeginnerTips.setOnCheckedChangeListener(null)
-        chkSound.setOnCheckedChangeListener(null)
+        chkMusic.setOnCheckedChangeListener(null)
+        chkSfx.setOnCheckedChangeListener(null)
+        chkDmVoice.setOnCheckedChangeListener(null)
         chkBeginnerTips.isChecked = soloCoachEnabled
-        chkSound.isChecked = soundEnabled
+        chkMusic.isChecked = musicEnabled
+        chkSfx.isChecked = sfxEnabled
+        chkDmVoice.isChecked = dmVoiceEnabled
         chkBeginnerTips.setOnCheckedChangeListener { _, checked ->
             soloCoachEnabled = checked
             prefs().edit().putBoolean("solo_coach_enabled", checked).apply()
         }
-        chkSound.setOnCheckedChangeListener { _, checked ->
-            soundEnabled = checked
-            prefs().edit().putBoolean("sound_enabled", checked).apply()
+        chkMusic.setOnCheckedChangeListener { _, checked ->
+            musicEnabled = checked
+            prefs().edit().putBoolean("pref_music_enabled", checked).apply()
+        }
+        chkSfx.setOnCheckedChangeListener { _, checked ->
+            sfxEnabled = checked
+            prefs().edit().putBoolean("pref_sfx_enabled", checked).apply()
+        }
+        chkDmVoice.setOnCheckedChangeListener { _, checked ->
+            dmVoiceEnabled = checked
+            prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
         }
         btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
         val verCode = try {
@@ -993,7 +1021,9 @@ class MainActivity : AppCompatActivity() {
             "1.2"
         }
         settingsAboutText.text =
-            getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")"
+            getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
+                "\n\nAudio attribution will list assets when music/SFX ship; " +
+                "DM voice uses on-device Text-to-Speech when enabled."
         settingsRoot.visibility = View.VISIBLE
         settingsRoot.bringToFront()
     }

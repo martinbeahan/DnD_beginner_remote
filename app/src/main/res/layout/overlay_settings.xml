@@ -45,11 +45,31 @@
                 android:paddingBottom="4dp" />
 
             <CheckBox
-                android:id="@+id/chkSound"
+                android:id="@+id/chkMusic"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:minHeight="48dp"
-                android:text="Sound on (no audio yet — stub)"
+                android:text="Music on (stub — no playback yet)"
+                android:textColor="@color/parchment"
+                android:buttonTint="@color/gold"
+                android:paddingBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/chkSfx"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Sound effects on (stub — no playback yet)"
+                android:textColor="@color/parchment"
+                android:buttonTint="@color/gold"
+                android:paddingBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/chkDmVoice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="DM voice on (stub — TTS later)"
                 android:textColor="@color/parchment"
                 android:buttonTint="@color/gold"
                 android:paddingBottom="8dp" />
