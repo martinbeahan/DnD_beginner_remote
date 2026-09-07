@@ -28,6 +28,41 @@ When **DM voice** is enabled in Settings (default **off**), notable `[DM]:` narr
 We intentionally avoid Mixkit Music, FreePD, and any D&D / Wizards of the Coast / Critical Role / film / commercial game OST material.
 
 
+## 2D graphics pack (v1.6)
+
+All bundled battle art ships under **Creative Commons Zero (CC0 / public domain)** or is original UI chrome (XML shapes). No Wizards of the Coast / D&D product art is used.
+
+### Character & monster sprites (LuizMelo — itch.io, CC0)
+
+Idle frames extracted from free CC0 packs, padded to 256×256 PNGs for Android drawables.
+
+| Asset in app | Source pack | Author | License | Link |
+|---|---|---|---|---|
+| `sprite_fighter.png` | Fantasy Warrior (Idle) | LuizMelo | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://luizmelo.itch.io/fantasy-warrior |
+| `sprite_wizard.png` | Wizard Pack (Idle) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/wizard-pack |
+| `sprite_rogue.png` | Huntress (Idle) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/huntress |
+| `sprite_cleric.png` | Medieval King Pack (Idle) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/medieval-king-pack |
+| `sprite_goblin.png` | Monsters Creatures Fantasy — Goblin (Idle) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/monsters-creatures-fantasy |
+| `sprite_skeleton.png` | Monsters Creatures Fantasy — Skeleton (Idle) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/monsters-creatures-fantasy |
+| `sprite_wolf.png` | Pet Dogs Pack — Akita Idle (recolored cooler gray for wolf read) | LuizMelo | CC0 1.0 | https://luizmelo.itch.io/pet-dogs-pack |
+| `sprite_ogre.png` | Tiny Creatures (tile upscaled; large humanoid) | Clint Bellanger | CC0 1.0 | https://opengameart.org/content/tiny-creatures |
+
+### Battle backgrounds
+
+| Asset in app | Source | Author | License | Link |
+|---|---|---|---|---|
+| `bg_battle_road.webp` | Dark forest path | quantumelle | CC0 1.0 | https://opengameart.org/content/dark-forest-path |
+| `bg_battle_woods.webp` | Backgrounds (battleback6) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_crypt.webp` | Backgrounds (battleback8) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_dungeon.webp` | Backgrounds (battleback5) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_vault.webp` | Phantasy Dungeon Entrance (skull layer) | ansimuz | CC0 1.0 | https://opengameart.org/content/phantasy-dungeon-entrance |
+
+Runtime wiring picks road / woods / crypt / vault / dungeon stage chrome from Solo quest beat names (and room text heuristics). HUD parchment, HP bars, and dice panel strokes are original XML drawables.
+
+### Not used
+
+No scraped D&D / WotC official art, Critical Role stills, or commercial game sprites.
+
 ## Rules content (SRD 5.1)
 
 Monster names, class features, and combat math in this app are inspired by the
