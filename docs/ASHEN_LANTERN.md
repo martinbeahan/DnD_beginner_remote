@@ -34,6 +34,10 @@ Host-as-DM / Join paths call `resetSoloQuestState()` — procedural rooms unchan
 7. Force-stop app mid-quest (e.g. after Thornpath) → **Continue** resumes same beat.
 8. Host online table → confirm no Ashen Lantern script (procedural Room 1).
 
+## Graphics (v1.6)
+
+Solo beats use distinct CC0 battle backgrounds (road/woods/crypt/vault/dungeon) plus upgraded party/enemy sprites (including wolf). See `ATTRIBUTION.md`.
+
 ## Out of scope
 
-2D/3D art overhaul, copying WotC modules, multiplayer campaign sync of quest beats.
+Further 3D/engine rewrites, copying WotC modules, multiplayer campaign sync of quest beats.
