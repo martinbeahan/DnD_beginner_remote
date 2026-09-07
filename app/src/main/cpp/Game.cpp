@@ -153,6 +153,7 @@ Character* Game::findCharacter(const std::string& name) {
 }
 
 void Game::buyItem(const std::string& playerName, int itemIndex) {
+    if (gameOver_) return;
     if (!isMerchantRoom_ || itemIndex < 0 || static_cast<size_t>(itemIndex) >= shopInventory_.size()) return;
     Character* hero = findCharacter(playerName);
     if (!hero) return;
@@ -204,6 +205,9 @@ void Game::processTurn() {
                 current->deathSaveFailures += (roll == 1 ? 2 : 1);
                 if (current->deathSaveFailures >= 3) {
                     addChatMessage("System", current->name + " has died.");
+                    lastEvent_ = "Game Over — " + current->name + " has fallen.";
+                    dmSay("The dungeon claims another. This adventure ends here.");
+                    addChatMessage("System", "Game Over");
                     gameOver_ = true;
                 }
             }
@@ -329,6 +333,7 @@ void Game::playerAttack(int targetEnemyIndex) {
 }
 
 void Game::playerHeal(int targetPlayerIndex) {
+    if (gameOver_) return;
     // Potion of Healing (SRD): 2d4+2. Anyone can drink one by spending a resource (supply).
     if (turnOrder_.empty()) return;
     Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
@@ -420,6 +425,14 @@ void Game::playerSpecialAction(int targetEnemyIndex) {
 }
 
 void Game::playerRest() {
+    if (gameOver_) { lastEvent_ = "Game Over — start a new adventure."; return; }
+    if (!turnOrder_.empty() && currentTurnIndex_ >= 0
+        && static_cast<size_t>(currentTurnIndex_) < turnOrder_.size()
+        && turnOrder_[static_cast<size_t>(currentTurnIndex_)]
+        && turnOrder_[static_cast<size_t>(currentTurnIndex_)]->isDowned) {
+        lastEvent_ = "You're dying — make death saves, you can't rest now.";
+        return;
+    }
     if (isMerchantRoom_) {
         roomCount_++;
         spawnRoomContent();
@@ -450,6 +463,7 @@ void Game::playerRest() {
 }
 
 void Game::playerInteract(const std::string& playerName) {
+    if (gameOver_) { lastEvent_ = "Game Over — start a new adventure."; return; }
     Character* hero = findCharacter(playerName);
     if (!hero) return;
 
@@ -468,6 +482,7 @@ void Game::playerInteract(const std::string& playerName) {
 }
 
 void Game::playerIncreaseStat(const std::string& playerName, int statIndex) {
+    if (gameOver_) return;
     Character* hero = findCharacter(playerName);
     if (hero) hero->increaseAttribute(statIndex);
 }
@@ -531,6 +546,7 @@ std::string Game::getPartyStatus() const {
     Character* current = (turnOrder_.empty() || currentTurnIndex_ < 0 || static_cast<size_t>(currentTurnIndex_) >= turnOrder_.size()) ? nullptr : turnOrder_[static_cast<size_t>(currentTurnIndex_)];
 
     ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (isMerchantRoom_ ? "Safe" : "None")) << "\n";
+    if (gameOver_) ss << "Game Over\n";
     for (const auto& p : players_) {
         ss << p->name << " | HP: " << p->currentHp << "/" << p->maxHp << (p->isDowned ? " [DOWN]" : "") << "\n";
     }
