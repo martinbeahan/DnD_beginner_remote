@@ -26,3 +26,16 @@ When **DM voice** is enabled in Settings (default **off**), notable `[DM]:` narr
 ## Not used
 
 We intentionally avoid Mixkit Music, FreePD, and any D&D / Wizards of the Coast / Critical Role / film / commercial game OST material.
+
+
+## Rules content (SRD 5.1)
+
+Monster names, class features, and combat math in this app are inspired by the
+**System Reference Document 5.1** (SRD 5.1), available under the
+[Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+
+This app is **compatible with 5e SRD** concepts only. It is **not** an official
+Dungeons & Dragons product. Wizards of the Coast, Dungeons & Dragons, and related
+marks are trademarks of Wizards of the Coast LLC. Original adventure text in this
+project (including the Solo quest *Ashen Lantern*) is original and not copied from
+any Wizards of the Coast adventure module.

@@ -24,6 +24,7 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     enemies_.clear();
     chatHistory_.clear();
     journalEntries_.clear();
+    shopInventory_.clear();
     while(!visualEvents_.empty()) visualEvents_.pop();
 
     gameOver_ = false;
@@ -31,22 +32,26 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     roomCount_ = 1;
     dmOnlyTable_ = false;
     roomSearchUsed_ = false;
+    isMerchantRoom_ = false;
     dmName_.clear();
     // Local / solo table is always the turn authority (clients opt out via prepareClientJoin).
     isHost_ = true;
+    // Solo original quest: Ashen Lantern (scripted beats 1–6).
+    questBeat_ = static_cast<int>(SoloQuestBeat::MILLHOLLOW);
+    questLanternRecovered_ = false;
+    questComplete_ = false;
+    questCryptKeyFound_ = false;
 
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
     addAlly("Melf (NPC)", CharacterClass::WIZARD);
 
-    generateRoomDescription();
-    spawnRoomContent();
+    applySoloQuestRoom();
     rollInitiative();
 
-    lastEvent_ = "Adventure Started! Room 1. Roll for Initiative!";
-    addChatMessage("System", "A new party has entered the dungeon.");
-    addJournalEntry("The party entered the dungeon.");
-    dmSay("Welcome, adventurers. I am your Dungeon Master. Steel yourselves — danger waits in the dark.");
-    dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, and Short Rest to recover.");
+    lastEvent_ = "Ashen Lantern — Millhollow Road. The village is dark.";
+    addChatMessage("System", "A new party begins the Ashen Lantern quest.");
+    dmSay("Welcome, adventurers. I am your Dungeon Master.");
+    dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, Search once per clear chamber, and Short Rest when safe.");
 }
 
 void Game::startDmSession(const std::string& dmName) {
@@ -64,6 +69,7 @@ void Game::startDmSession(const std::string& dmName) {
     isMerchantRoom_ = false;
     roomSearchUsed_ = false;
     dmOnlyTable_ = true;
+    resetSoloQuestState();
     dmName_ = dmName.empty() ? "Dungeon Master" : dmName;
     isHost_ = true;
 
@@ -84,6 +90,7 @@ void Game::dmBeginDungeon() {
     isMerchantRoom_ = false;
     roomSearchUsed_ = false;
     gameOver_ = false;
+    resetSoloQuestState(); // Host-as-DM uses procedural rooms, not solo script
     generateRoomDescription();
     spawnRoomContent();
     rollInitiative();
@@ -139,6 +146,7 @@ void Game::prepareClientJoin() {
     isMerchantRoom_ = false;
     roomSearchUsed_ = false;
     dmOnlyTable_ = false;
+    resetSoloQuestState();
     dmName_.clear();
     isHost_ = false;
     currentTurnIndex_ = 0;
@@ -167,7 +175,176 @@ void Game::addAlly(const std::string& name, CharacterClass cl) {
     rebuildTurnOrder();
 }
 
+void Game::resetSoloQuestState() {
+    questBeat_ = static_cast<int>(SoloQuestBeat::NONE);
+    questLanternRecovered_ = false;
+    questComplete_ = false;
+    questCryptKeyFound_ = false;
+}
+
+void Game::applySoloQuestRoom() {
+    enemies_.clear();
+    shopInventory_.clear();
+    isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
+
+    const QuestBeatScript* beat = findQuestBeat(questBeat_);
+    if (!beat) {
+        // Fallback to procedural if beat table missing
+        generateRoomDescription();
+        spawnRoomContent();
+        return;
+    }
+
+    roomDescription_ = std::string(beat->roomDescription);
+    dmSay(std::string("[") + beat->title + "] " + beat->dmEnter);
+    dmSay(roomDescription_);
+    addJournalEntry(beat->journalOnEnter);
+
+    spawnSoloQuestEnemies();
+    maybeFinishQuestOnResolutionEnter();
+
+    if (enemies_.empty()) {
+        // Soft-open story beats: Search / Rest / Onward available immediately.
+        turnOrder_.clear();
+        currentTurnIndex_ = 0;
+        lastEvent_ = std::string(beat->title) + " — chamber open. Search, Rest, or Onward.";
+    } else {
+        lastEvent_ = std::string(beat->title) + " — foes ahead!";
+    }
+}
+
+void Game::spawnSoloQuestEnemies() {
+    enemies_.clear();
+    const auto beat = static_cast<SoloQuestBeat>(questBeat_);
+
+    auto makeFoe = [&](const std::string& name, CharacterClass cl, int bonusHp, int bonusAc) {
+        auto foe = std::make_unique<Character>(name, cl, name + "-" + std::to_string(getRandomInt(0, 1000000)));
+        foe->maxHp = std::max(4, foe->maxHp + bonusHp);
+        foe->currentHp = foe->maxHp;
+        foe->armorClass += bonusAc;
+        enemies_.push_back(std::move(foe));
+    };
+
+    switch (beat) {
+        case SoloQuestBeat::MILLHOLLOW:
+            // Soft open with optional light scout — one goblin if the road feels watched.
+            makeFoe("Goblin Scout", CharacterClass::ROGUE, -2, 0);
+            break;
+        case SoloQuestBeat::THORNPATH:
+            makeFoe("Wolf", CharacterClass::ROGUE, 2, 0);
+            if (getRandomInt(0, 1) == 1) {
+                makeFoe("Goblin", CharacterClass::ROGUE, 0, 0);
+            }
+            break;
+        case SoloQuestBeat::CRYPT_DOORS:
+            // Puzzle-lite soft open: Search once for the rune-key (no mandatory fight).
+            break;
+        case SoloQuestBeat::BONE_GALLERY:
+            makeFoe("Skeleton", CharacterClass::FIGHTER, 4, 1);
+            makeFoe("Skeleton", CharacterClass::FIGHTER, 2, 0);
+            break;
+        case SoloQuestBeat::LANTERN_VAULT:
+            // Ogre-lite / skeleton champion using existing FIGHTER class.
+            makeFoe("Skeleton Champion", CharacterClass::FIGHTER, 18, 2);
+            break;
+        case SoloQuestBeat::RESOLUTION:
+            // Shrine: no fight — resolution beat.
+            break;
+        default:
+            break;
+    }
+}
+
+void Game::grantAshenLantern(Character* actor) {
+    if (questLanternRecovered_) return;
+    questLanternRecovered_ = true;
+    Character* hero = actor;
+    if (!hero || hero->isDead) {
+        hero = nullptr;
+        for (auto& p : players_) {
+            if (p && !p->isDead) { hero = p.get(); break; }
+        }
+    }
+    if (hero) {
+        // Thematic quest item: modest weapon blessing without replacing class identity harshly.
+        hero->equippedWeapon = std::make_shared<Item>(Item{"Ashen Lantern", ItemType::WEAPON, 1});
+        hero->gold += 25;
+    }
+    dmSay("You seize the Ashen Lantern. Grey glass drinks the dark — Millhollow's hope is in your hands.");
+    addJournalEntry("Recovered the Ashen Lantern (questLanternRecovered).");
+    addChatMessage("Quest", "Ashen Lantern recovered!");
+    lastEvent_ = "Ashen Lantern recovered! Rest if needed, then Onward to the shrine.";
+}
+
+void Game::maybeFinishQuestOnResolutionEnter() {
+    if (static_cast<SoloQuestBeat>(questBeat_) != SoloQuestBeat::RESOLUTION) return;
+    if (!questLanternRecovered_) {
+        // Safety: if vault was skipped somehow, still grant on shrine enter.
+        grantAshenLantern(players_.empty() ? nullptr : players_[0].get());
+    }
+    if (!questComplete_) {
+        questComplete_ = true;
+        dmSay("You set the Ashen Lantern on the shrine. Warm ash-light blooms. Night-things withdraw from Millhollow.");
+        dmSay("Quest complete. Take a Short Rest, return to the menu when ready, or press Onward for more rooms (main quest done).");
+        addJournalEntry("Ashen Lantern quest complete — lantern lit at the crypt shrine.");
+        addChatMessage("Quest", "Main quest done — Ashen Lantern.");
+    }
+}
+
+bool Game::trySoloQuestSearch(Character* hero) {
+    if (!hero || !isSoloQuestScripted()) return false;
+    const auto beat = static_cast<SoloQuestBeat>(questBeat_);
+
+    if (beat == SoloQuestBeat::MILLHOLLOW) {
+        hero->gold += 8;
+        lastEvent_ = hero->name + " finds a soot-stained note: "Hollowbarrow Crypt. Bring no open flame — the Ashen Lantern alone."";
+        dmSay("A villager's scrap points to Hollowbarrow Crypt. The Ashen Lantern must burn there — or return to the green.");
+        addJournalEntry("Clue: Hollowbarrow Crypt holds the Ashen Lantern; open flame is unwelcome.");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::CRYPT_DOORS) {
+        questCryptKeyFound_ = true;
+        lastEvent_ = hero->name + " pries a cold iron rune-key from the ash-stained lintel.";
+        dmSay("The rune-key turns. Crypt wards sigh open — the Bone Gallery waits beyond.");
+        addJournalEntry("Found the Ashen Rune-Key at Hollowbarrow's doors.");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::LANTERN_VAULT && questLanternRecovered_) {
+        hero->gold += 12;
+        lastEvent_ = hero->name + " finds spare oil and 12 gold near the plinth.";
+        dmSay("A pouch of oil and coin — useful, but the lantern itself is the true prize.");
+        addJournalEntry(lastEvent_);
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::RESOLUTION) {
+        lastEvent_ = hero->name + " finds soot-spirals on the altar — the shrine remembers every night the lantern burned.";
+        dmSay("Nothing more to take. Millhollow's thanks will be quieter than gold.");
+        addJournalEntry("Searched the Ashen Shrine — the quest is already won.");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    return false; // use default Search loot/trap
+}
+
 void Game::generateRoomDescription() {
+    if (isSoloQuestScripted()) {
+        // Description already set by applySoloQuestRoom; keep procedural helper for post-quest / DM.
+        return;
+    }
+    if (questComplete_) {
+        std::vector<std::string> adjectives = {"dark", "damp", "ancient", "dusty", "eerie", "forgotten", "cursed"};
+        std::vector<std::string> rooms = {"chamber", "hallway", "library", "crypt", "vault", "shrine", "laboratory"};
+        std::stringstream ss;
+        ss << "[Main quest done] You press beyond the shrine into a " << adjectives[static_cast<size_t>(getRandomInt(0, static_cast<int>(adjectives.size()) - 1))]
+           << " " << rooms[static_cast<size_t>(getRandomInt(0, static_cast<int>(rooms.size()) - 1))] << ". ";
+        roomDescription_ = ss.str();
+        dmSay("Room " + std::to_string(roomCount_) + " (after Ashen Lantern): " + roomDescription_ + "What do you do?");
+        return;
+    }
     std::vector<std::string> adjectives = {"dark", "damp", "ancient", "dusty", "eerie", "forgotten", "cursed"};
     std::vector<std::string> rooms = {"chamber", "hallway", "library", "crypt", "vault", "shrine", "laboratory"};
     std::stringstream ss;
@@ -182,6 +359,11 @@ void Game::spawnRoomContent() {
     shopInventory_.clear();
     isMerchantRoom_ = false;
     roomSearchUsed_ = false;
+
+    if (isSoloQuestScripted()) {
+        spawnSoloQuestEnemies();
+        return;
+    }
 
     if (roomCount_ > 1 && roomCount_ % 4 == 0) {
         isMerchantRoom_ = true;
@@ -377,7 +559,9 @@ void Game::enterClearedRoom(Character* actor) {
         }
     }
     dmSay("The party gains " + std::to_string(xpGained) + " XP.");
-    if (actor && !actor->isDead) {
+    if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::LANTERN_VAULT) {
+        grantAshenLantern(actor);
+    } else if (actor && !actor->isDead) {
         auto loot = LootSystem::generateLoot(roomCount_);
         if (loot) {
             if (loot->type == ItemType::WEAPON) actor->equippedWeapon = loot;
@@ -393,7 +577,11 @@ void Game::enterClearedRoom(Character* actor) {
     roomDescription_ += " The foes lie still. You may Search, take a Short Rest, or press Onward.";
     lastEvent_ = "Room cleared! Search, Rest, or Onward.";
     addChatMessage("Combat", lastEvent_);
-    dmSay("The chamber is clear. Search for loot, take a Short Rest, or press Onward.");
+    if (questLanternRecovered_ && static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::LANTERN_VAULT) {
+        dmSay("The vault is clear. Carry the Ashen Lantern Onward to the shrine — or Search and Rest first.");
+    } else {
+        dmSay("The chamber is clear. Search for loot, take a Short Rest, or press Onward.");
+    }
 }
 
 void Game::purgeDownedEnemies() {
@@ -832,7 +1020,9 @@ void Game::playerInteract(const std::string& playerName) {
     // One meaningful Search per room (success or fail locks further Search).
     roomSearchUsed_ = true;
 
-    if (hero->performSavingThrow(hero->attributes.intelligence, 12)) {
+    if (trySoloQuestSearch(hero)) {
+        // Story Search handled (clue / rune-key / shrine).
+    } else if (hero->performSavingThrow(hero->attributes.intelligence, 12)) {
         int found = 15 + roomCount_ * 2 + getRandomInt(0, 10);
         hero->gold += found;
         lastEvent_ = hero->name + " searched and found " + std::to_string(found) + " gold pieces!";
@@ -870,6 +1060,46 @@ void Game::playerAdvanceFromCleared() {
         dmSay("Steel yourselves — finish the fight first.");
         return;
     }
+
+    // Solo Ashen Lantern: step through scripted beats, then procedural post-quest.
+    if (isSoloQuestScripted()) {
+        if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::CRYPT_DOORS && !questCryptKeyFound_) {
+            dmSay("The doors yield grudgingly — you force them without the rune-key. Dust and bone-scent spill out.");
+            addJournalEntry("Forced Hollowbarrow's doors without the Ashen Rune-Key.");
+        }
+        if (questBeat_ < static_cast<int>(SoloQuestBeat::RESOLUTION)) {
+            questBeat_++;
+            roomCount_++;
+            roomSearchUsed_ = false;
+            applySoloQuestRoom();
+            if (!enemies_.empty()) {
+                rollInitiative();
+            }
+            lastEvent_ = std::string("Onward — ") + soloQuestBeatName(questBeat_) + ".";
+            addChatMessage("Quest", lastEvent_);
+            addJournalEntry("The party advanced to " + std::string(soloQuestBeatName(questBeat_)) + ".");
+            return;
+        }
+        // Leaving the shrine: mark post-quest procedural.
+        questBeat_ = static_cast<int>(SoloQuestBeat::POST_QUEST);
+        questComplete_ = true;
+        roomCount_++;
+        roomSearchUsed_ = false;
+        spawnRoomContent();
+        if (!isMerchantRoom_) {
+            generateRoomDescription();
+            rollInitiative();
+        } else {
+            turnOrder_.clear();
+            currentTurnIndex_ = 0;
+        }
+        lastEvent_ = "Quest complete banner: deeper rooms await. Room " + std::to_string(roomCount_) + ".";
+        addChatMessage("Quest", "Main quest done — continuing into unscripted chambers.");
+        dmSay("Beyond the shrine, the dungeon grows wild again. The Ashen Lantern's work is finished — adventure is not.");
+        addJournalEntry("Post-quest exploration begins (main quest done).");
+        return;
+    }
+
     roomCount_++;
     roomSearchUsed_ = false;
     spawnRoomContent();
@@ -1113,6 +1343,8 @@ std::string Game::getPartyStatus() const {
 
     const bool exploreBeat = isMerchantRoom_ || (enemies_.empty() && roomCount_ >= 1 && !dmOnlyTable_);
     ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (exploreBeat ? "Safe" : "None")) << "\n";
+    if (questComplete_) ss << "Quest complete: Ashen Lantern recovered\n";
+    else if (isSoloQuestScripted()) ss << "Quest: Ashen Lantern — " << soloQuestBeatName(questBeat_) << "\n";
     if (gameOver_) ss << "Game Over\n";
     if (dmOnlyTable_ && !dmName_.empty()) ss << "DM: " << dmName_ << "\n";
     for (const auto& p : players_) {
@@ -1160,7 +1392,9 @@ std::string Game::serialize() {
     std::string dmSafe = dmName_;
     for (char& c : dmSafe) { if (c == ',' || c == '|' || c == '~') c = '_'; }
     ss << sessionId_ << "," << roomCount_ << "," << (gameOver_ ? 1 : 0) << "," << currentTurnIndex_ << "," << (isMerchantRoom_ ? 1 : 0)
-       << "," << (dmOnlyTable_ ? 1 : 0) << "," << dmSafe << "," << (roomSearchUsed_ ? 1 : 0) << "|";
+       << "," << (dmOnlyTable_ ? 1 : 0) << "," << dmSafe << "," << (roomSearchUsed_ ? 1 : 0)
+       << "," << questBeat_ << "," << (questLanternRecovered_ ? 1 : 0) << "," << (questComplete_ ? 1 : 0)
+       << "," << (questCryptKeyFound_ ? 1 : 0) << "|";
     // Section 1: Descriptions
     ss << roomDescription_ << "~" << lastEvent_ << "|";
     // Section 2: Players
@@ -1215,6 +1449,15 @@ void Game::deserialize(const std::string& data) {
             else if (!dmOnlyTable_) dmName_.clear();
             if (std::getline(ss_sub, val, ',')) roomSearchUsed_ = (val == "1");
             else roomSearchUsed_ = false;
+            // Optional quest fields (Ashen Lantern) — backward compatible with older saves.
+            if (std::getline(ss_sub, val, ',')) questBeat_ = std::stoi(val);
+            else questBeat_ = 0;
+            if (std::getline(ss_sub, val, ',')) questLanternRecovered_ = (val == "1");
+            else questLanternRecovered_ = false;
+            if (std::getline(ss_sub, val, ',')) questComplete_ = (val == "1");
+            else questComplete_ = false;
+            if (std::getline(ss_sub, val, ',')) questCryptKeyFound_ = (val == "1");
+            else questCryptKeyFound_ = false;
         }
     }
 

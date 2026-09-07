@@ -42,12 +42,13 @@ object BeginnerGuide {
         ),
         Page(
             "Playing solo",
-            "When you're alone, the AI DM coaches you:\n\n" +
-                "• Explains whose turn it is\n" +
-                "• Reminds you what buttons mean\n" +
-                "• Nudges you if you're hurt or out of resources\n\n" +
-                "Tap Help anytime for this guide again.\n" +
-                "Long-press the top status bar to copy your Session ID if a friend joins later."
+            "Solo New Game starts the original quest Ashen Lantern:\n\n" +
+                "• Millhollow's protective lantern was stolen into Hollowbarrow Crypt\n" +
+                "• Follow story beats (road → woods → crypt → vault → shrine)\n" +
+                "• Search for clues/keys; recover the lantern; Rest at the shrine\n\n" +
+                "After the main quest, you can keep exploring random rooms.\n" +
+                "Continue mid-quest works — your beat is saved.\n\n" +
+                "Compatible with 5e SRD concepts only (not an official D&D product)."
         )
     )
 

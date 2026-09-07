@@ -2,6 +2,7 @@
 #define DND_GAME_H
 
 #include "GameLogic.h"
+#include "QuestScript.h"
 #include <vector>
 #include <string>
 #include <queue>
@@ -88,6 +89,14 @@ public:
     }
     bool hasSearchedRoom() const { return roomSearchUsed_; }
     int getRoomCount() const { return roomCount_; }
+    int getQuestBeat() const { return questBeat_; }
+    bool isQuestLanternRecovered() const { return questLanternRecovered_; }
+    bool isQuestComplete() const { return questComplete_; }
+    /** Solo scripted Ashen Lantern beats (1–6); false for Host-as-DM / online lobby. */
+    bool isSoloQuestScripted() const {
+        return questBeat_ >= static_cast<int>(SoloQuestBeat::MILLHOLLOW)
+            && questBeat_ <= static_cast<int>(SoloQuestBeat::RESOLUTION);
+    }
 
     const std::vector<std::unique_ptr<Character>>& getPlayers() const { return players_; }
     const std::vector<std::unique_ptr<Character>>& getEnemies() const { return enemies_; }
@@ -133,6 +142,11 @@ private:
     bool isMerchantRoom_ = false;
     bool dmOnlyTable_ = false;
     bool roomSearchUsed_ = false; // one Search attempt per chamber (anti-exploit)
+    // Solo Ashen Lantern quest (original; SRD-compatible monsters only). Online DM path leaves beat at NONE.
+    int questBeat_ = 0;
+    bool questLanternRecovered_ = false;
+    bool questComplete_ = false;
+    bool questCryptKeyFound_ = false;
     std::string dmName_;
 
     std::mt19937 rng_;
@@ -153,6 +167,12 @@ private:
     void enterClearedRoom(Character* actor);
     void grantKillLoot(Character* actor, const std::string& foeName);
     void dmSay(const std::string& line);
+    void resetSoloQuestState();
+    void applySoloQuestRoom();
+    void spawnSoloQuestEnemies();
+    void grantAshenLantern(Character* actor);
+    void maybeFinishQuestOnResolutionEnter();
+    bool trySoloQuestSearch(Character* hero);
     int proficiencyBonus() const;
     void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);
     bool performWeaponAttack(Character* actor, Character& target, int attackerVisualIndex, bool targetIsEnemy, int targetIndex, bool sneakAttack);

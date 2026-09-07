@@ -1097,9 +1097,10 @@ class MainActivity : AppCompatActivity() {
         }
         settingsAboutText.text =
             getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
-                "\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
+                "\n\nCompatible with 5e SRD (SRD 5.1, CC-BY 4.0). Not an official D&D product. " +
+                "See ATTRIBUTION.md.\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
                 "StarNinjas sword/clash SFX; Darsycho monster snarl; bart interface beep. " +
-                "See ATTRIBUTION.md. DM voice uses on-device Text-to-Speech (no third-party voices)."
+                "DM voice uses on-device Text-to-Speech (no third-party voices)."
         settingsRoot.visibility = View.VISIBLE
         settingsRoot.bringToFront()
     }
@@ -1549,6 +1550,14 @@ class MainActivity : AppCompatActivity() {
             isOnlineHost && status.contains("waiting for players", ignoreCase = true) -> "DM · waiting for heroes"
             isOnlineHost -> "DM · directing the table"
             isOnlineClient && remoteDmName.isNotBlank() -> "DM: $remoteDmName · $whose"
+            status.contains("Quest complete", ignoreCase = true) &&
+                try { isRoomCleared() } catch (_: Exception) { false } ->
+                "Main quest done — Ashen Lantern · Search, Rest, or Onward"
+            status.contains("Quest complete", ignoreCase = true) -> "Main quest done — Ashen Lantern"
+            status.contains("Quest: Ashen Lantern", ignoreCase = true) &&
+                try { isRoomCleared() } catch (_: Exception) { false } ->
+                status.lineSequence().firstOrNull { it.startsWith("Quest:") }?.removePrefix("Quest:")?.trim()
+                    ?.let { "Quest · $it · clear" } ?: "Room clear — Search, Rest, or Onward"
             isShop -> "Safe haven — merchant"
             try { isRoomCleared() } catch (_: Exception) { false } -> "Room clear — Search, Rest, or Onward"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
