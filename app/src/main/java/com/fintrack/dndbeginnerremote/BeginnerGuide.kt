@@ -42,12 +42,13 @@ object BeginnerGuide {
         ),
         Page(
             "Playing solo",
-            "Solo New Game starts the original quest Ashen Lantern:\n\n" +
-                "• Millhollow's protective lantern was stolen into Hollowbarrow Crypt\n" +
-                "• Follow story beats (road → woods → crypt → vault → shrine)\n" +
-                "• Search for clues/keys; recover the lantern; Rest at the shrine\n\n" +
-                "After the main quest, you can keep exploring random rooms.\n" +
-                "Continue mid-quest works — your beat is saved.\n\n" +
+            "Story adventure runs original quests (Ashen Lantern, then Millhollow's Debt):\n\n" +
+                "• Act 1: recover the Ashen Lantern from Hollowbarrow Crypt\n" +
+                "• Act 2: settle Millhollow's coerced grain debt at the mill\n" +
+                "• Dungeon Crawl skips story for procedural rooms from the start\n\n" +
+                "Pick Difficulty on the main menu (default Easy). On a full party wipe:\n" +
+                "Easy/Medium keep gear; Hard strips gold/gear; Nightmare ends the run.\n\n" +
+                "Continue mid-quest works — your beat is saved.\n" +
                 "Compatible with 5e SRD concepts only (not an official D&D product)."
         )
     )

@@ -253,11 +253,36 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_processGameTurn(JNIEnv *env, jo
 }
 
 JNIEXPORT void JNICALL
-Java_com_fintrack_dndbeginnerremote_MainActivity_resetGame(JNIEnv *env, jobject thiz, jint characterClass, jstring playerName) {
+Java_com_fintrack_dndbeginnerremote_MainActivity_resetGame(JNIEnv *env, jobject thiz, jint characterClass, jstring playerName, jint soloPlayMode, jint difficulty) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
-    g_Game.startNewGame(static_cast<dnd::CharacterClass>(characterClass), nativeName);
+    g_Game.startNewGame(static_cast<dnd::CharacterClass>(characterClass), nativeName ? nativeName : "Hero",
+                        static_cast<int>(soloPlayMode), static_cast<int>(difficulty));
     env->ReleaseStringUTFChars(playerName, nativeName);
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_setDifficulty(JNIEnv *env, jobject thiz, jint difficulty) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.setDifficulty(static_cast<int>(difficulty));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getDifficulty(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return static_cast<jint>(g_Game.getDifficulty());
+}
+
+JNIEXPORT jint JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getSoloPlayMode(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return static_cast<jint>(g_Game.getSoloPlayMode());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_recoverFromPartyWipe(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.recoverFromPartyWipe() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL

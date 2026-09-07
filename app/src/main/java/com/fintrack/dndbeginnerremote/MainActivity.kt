@@ -66,11 +66,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mainMenuRoot: View
     private lateinit var btnMenuContinue: Button
     private lateinit var btnMenuSolo: Button
+    private lateinit var btnMenuCrawl: Button
+    private lateinit var btnMenuDifficulty: Button
     private lateinit var btnMenuHost: Button
     private lateinit var btnMenuJoin: Button
     private lateinit var btnMenuSettings: Button
     private lateinit var btnMenuQuit: Button
     private lateinit var mainMenuSubtitle: TextView
+    private lateinit var mainMenuDifficultyLabel: TextView
     private lateinit var settingsRoot: View
     private lateinit var chkBeginnerTips: CheckBox
     private lateinit var chkMusic: CheckBox
@@ -80,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettingsAbandon: Button
     private lateinit var btnSettingsClose: Button
     private lateinit var settingsAboutText: TextView
+    private lateinit var settingsDifficultyText: TextView
     // Audio prefs + GameAudio (BGM / SFX / optional on-device TTS).
     private var musicEnabled = true
     private var sfxEnabled = true
@@ -112,6 +116,11 @@ class MainActivity : AppCompatActivity() {
     private var lastCoachTip = ""
     private var lastCoachTurnKey = ""
     private var soloCoachEnabled = true
+    /** Preferred difficulty (0 Easy … 3 Nightmare). Locked into a run when adventure starts. */
+    private var preferredDifficulty = 0
+    /** Difficulty locked for the active run (-1 = none). */
+    private var runDifficulty = -1
+    private var wipeDialogShowing = false
     /** True after Continue / New Game / Join — avoids wiping save in onPause before that. */
     private var sessionActive = false
     /** True when this device is the online DM (authoritative). */
@@ -165,7 +174,11 @@ class MainActivity : AppCompatActivity() {
     external fun addRemoteAlly(characterClass: Int, playerName: String)
     external fun sendChatMessage(sender: String, message: String)
     external fun processGameTurn()
-    external fun resetGame(characterClass: Int, playerName: String)
+    external fun resetGame(characterClass: Int, playerName: String, soloPlayMode: Int, difficulty: Int)
+    external fun setDifficulty(difficulty: Int)
+    external fun getDifficulty(): Int
+    external fun getSoloPlayMode(): Int
+    external fun recoverFromPartyWipe(): Boolean
     external fun startDmSession(dmName: String)
     external fun dmBeginDungeon()
     external fun dmAdvanceRoom()
@@ -304,7 +317,15 @@ class MainActivity : AppCompatActivity() {
             try { gameAudio?.playUiClick() } catch (_: Exception) {}
             showSettingsOverlay()
         }
-        btnReset.setOnClickListener { resetToStartMenu() }
+        btnReset.setOnClickListener {
+            val status = try { getPlayerStatus() } catch (_: Exception) { "" }
+            if (status.contains("Game Over", ignoreCase = true)) {
+                wipeDialogShowing = false
+                handlePartyWipeUi()
+            } else {
+                resetToStartMenu()
+            }
+        }
         btnReset.text = "Menu"
 
         findViewById<View>(R.id.topBar).setOnLongClickListener {
@@ -319,6 +340,7 @@ class MainActivity : AppCompatActivity() {
         musicEnabled = prefs().getBoolean("pref_music_enabled", true)
         sfxEnabled = prefs().getBoolean("pref_sfx_enabled", true)
         dmVoiceEnabled = prefs().getBoolean("pref_dm_voice_enabled", false)
+        preferredDifficulty = prefs().getInt("pref_difficulty", 0).coerceIn(0, 3)
         gameAudio = GameAudio(this).also {
             it.start(musicEnabled, sfxEnabled, dmVoiceEnabled)
         }
@@ -433,9 +455,9 @@ class MainActivity : AppCompatActivity() {
         try {
             val st = getPlayerStatus()
             if (st.contains("Game Over", ignoreCase = true)) {
-                Toast.makeText(this, "Game Over — tap Menu, then Solo adventure.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Game Over — use the wipe dialog or Menu.", Toast.LENGTH_LONG).show()
                 btnReset.visibility = View.VISIBLE
-                clearSave("blocked action after death")
+                handlePartyWipeUi()
                 return
             }
             val localDown = st.lineSequence().any {
@@ -773,7 +795,18 @@ class MainActivity : AppCompatActivity() {
         try {
             val data = saveGameState()
             if (saveIsGameOver(data)) {
-                clearSave("defeat during sync")
+                val d = try { getDifficulty() } catch (_: Exception) { preferredDifficulty }
+                if (d == 3) {
+                    clearSave("nightmare defeat during sync")
+                } else {
+                    // Keep Game Over save so Easy/Med/Hard Continue can recover.
+                    prefs().edit()
+                        .putString("save_state", data)
+                        .putString("hero_name", localPlayerName)
+                        .putInt("hero_class", localClassId)
+                        .putBoolean("crash_guard", false)
+                        .apply()
+                }
             } else {
                 prefs().edit()
                     .putString("save_state", data)
@@ -816,10 +849,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun livableSavedState(): String? {
         val data = savedState() ?: return null
-        if (saveIsGameOver(data)) {
-            clearSave("game over")
-            return null
-        }
+        // Keep Game Over saves so Easy/Med/Hard can Continue via wipe dialog.
+        // Nightmare clears save immediately on wipe.
         return data
     }
 
@@ -872,11 +903,21 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (status.contains("Game Over", ignoreCase = true) || saveIsGameOver(data)) {
+            // Easy/Med/Hard may still Continue from wipe rules
+            val d = try { getDifficulty() } catch (_: Exception) { preferredDifficulty }
+            if (d in 0..2) {
+                activateSession()
+                runDifficulty = d
+                hideMainMenu()
+                handlePartyWipeUi()
+                return
+            }
             clearSave("continued into game over")
             Toast.makeText(this, "That adventure already ended. Start a new one.", Toast.LENGTH_LONG).show()
             showStartDialog()
             return
         }
+        runDifficulty = try { getDifficulty() } catch (_: Exception) { preferredDifficulty }
         // Successful deserialize + live status — do not treat as unclean exit.
         prefs().edit().putBoolean("crash_guard", false).apply()
 
@@ -951,8 +992,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun difficultyLabel(d: Int): String = when (d.coerceIn(0, 3)) {
+        0 -> "Easy"
+        1 -> "Medium"
+        2 -> "Hard"
+        else -> "Nightmare"
+    }
+
     private fun refreshMainMenuButtons() {
         if (!::btnMenuContinue.isInitialized) return
+        if (::mainMenuDifficultyLabel.isInitialized) {
+            mainMenuDifficultyLabel.text = "Difficulty: ${difficultyLabel(preferredDifficulty)}"
+        }
         val saved = livableSavedState()
         if (saved != null) {
             val wasHost = prefs().getBoolean("was_online_host", false)
@@ -972,15 +1023,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showDifficultyPicker(lockForRun: Boolean) {
+        if (lockForRun && sessionActive && runDifficulty >= 0) {
+            Toast.makeText(this, "Difficulty is locked for this run (${difficultyLabel(runDifficulty)}).", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = arrayOf("Easy", "Medium", "Hard", "Nightmare")
+        AlertDialog.Builder(this)
+            .setTitle("Difficulty")
+            .setSingleChoiceItems(labels, preferredDifficulty.coerceIn(0, 3)) { dialog, which ->
+                preferredDifficulty = which
+                prefs().edit().putInt("pref_difficulty", preferredDifficulty).apply()
+                refreshMainMenuButtons()
+                if (::settingsDifficultyText.isInitialized && settingsRoot.visibility == View.VISIBLE) {
+                    updateSettingsDifficultyText()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateSettingsDifficultyText() {
+        if (!::settingsDifficultyText.isInitialized) return
+        val locked = sessionActive && runDifficulty >= 0
+        val shown = if (locked) runDifficulty else preferredDifficulty
+        settingsDifficultyText.text = if (locked) {
+            "Difficulty: ${difficultyLabel(shown)} (locked for this run)"
+        } else {
+            "Difficulty: ${difficultyLabel(shown)} (applies to next adventure)"
+        }
+    }
+
     private fun wireMainMenuAndSettings() {
         mainMenuRoot = findViewById(R.id.mainMenuRoot)
         btnMenuContinue = findViewById(R.id.btnMenuContinue)
         btnMenuSolo = findViewById(R.id.btnMenuSolo)
+        btnMenuCrawl = findViewById(R.id.btnMenuCrawl)
+        btnMenuDifficulty = findViewById(R.id.btnMenuDifficulty)
         btnMenuHost = findViewById(R.id.btnMenuHost)
         btnMenuJoin = findViewById(R.id.btnMenuJoin)
         btnMenuSettings = findViewById(R.id.btnMenuSettings)
         btnMenuQuit = findViewById(R.id.btnMenuQuit)
         mainMenuSubtitle = findViewById(R.id.mainMenuSubtitle)
+        mainMenuDifficultyLabel = findViewById(R.id.mainMenuDifficultyLabel)
 
         settingsRoot = findViewById(R.id.settingsRoot)
         chkBeginnerTips = findViewById(R.id.chkBeginnerTips)
@@ -991,6 +1077,7 @@ class MainActivity : AppCompatActivity() {
         btnSettingsAbandon = findViewById(R.id.btnSettingsAbandon)
         btnSettingsClose = findViewById(R.id.btnSettingsClose)
         settingsAboutText = findViewById(R.id.settingsAboutText)
+        settingsDifficultyText = findViewById(R.id.settingsDifficultyText)
 
         btnMenuContinue.setOnClickListener {
             // Menu stays until continueSavedGame succeeds (activateSession) or
@@ -1002,6 +1089,15 @@ class MainActivity : AppCompatActivity() {
                 localPlayerName = name
                 showClassSelection(mode = "solo")
             }
+        }
+        btnMenuCrawl.setOnClickListener {
+            askHeroName { name ->
+                localPlayerName = name
+                showClassSelection(mode = "crawl")
+            }
+        }
+        btnMenuDifficulty.setOnClickListener {
+            showDifficultyPicker(lockForRun = false)
         }
         btnMenuHost.setOnClickListener {
             if (!firebaseReady()) {
@@ -1088,6 +1184,14 @@ class MainActivity : AppCompatActivity() {
             gameAudio?.setDmVoiceEnabled(checked)
         }
         btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
+        updateSettingsDifficultyText()
+        settingsDifficultyText.setOnClickListener {
+            if (sessionActive && runDifficulty >= 0) {
+                Toast.makeText(this, "Difficulty is locked for this run.", Toast.LENGTH_SHORT).show()
+            } else {
+                showDifficultyPicker(lockForRun = false)
+            }
+        }
         val verCode = try {
             packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
         } catch (_: Exception) {
@@ -1136,6 +1240,8 @@ class MainActivity : AppCompatActivity() {
             .remove("was_online_client")
             .remove("online_session_id")
             .apply()
+        runDifficulty = -1
+        wipeDialogShowing = false
         Toast.makeText(this, "Adventure abandoned.", Toast.LENGTH_SHORT).show()
         showStartDialog()
     }
@@ -1195,19 +1301,25 @@ class MainActivity : AppCompatActivity() {
         val classes = arrayOf("Fighter", "Wizard", "Rogue", "Cleric")
         val title = when (mode) {
             "join" -> "Choose your class"
+            "crawl" -> "Dungeon Crawl — choose class"
+            "solo" -> "Story — choose class"
             else -> "Choose your class"
         }
         AlertDialog.Builder(this).setTitle(title).setItems(classes) { _, which ->
             Log.d(TAG, "Class $which selected. mode=$mode")
             localClassId = which
             when (mode) {
-                "solo" -> {
+                "solo", "crawl" -> {
                     detachOnlineSession()
-                    resetGame(which, localPlayerName)
+                    val playMode = if (mode == "crawl") 1 else 0
+                    runDifficulty = preferredDifficulty.coerceIn(0, 3)
+                    resetGame(which, localPlayerName, playMode, runDifficulty)
                     setHost(true)
                     maybeOfferTutorialThenCoach()
                     activateSession()
                     btnReset.visibility = View.GONE
+                    wipeDialogShowing = false
+                    prefs().edit().putInt("hero_class", which).putString("hero_name", localPlayerName).apply()
                     syncAndSave()
                     updateUi()
                 }
@@ -1555,14 +1667,22 @@ class MainActivity : AppCompatActivity() {
             isOnlineHost && status.contains("waiting for players", ignoreCase = true) -> "DM · waiting for heroes"
             isOnlineHost -> "DM · directing the table"
             isOnlineClient && remoteDmName.isNotBlank() -> "DM: $remoteDmName · $whose"
+            status.contains("Story complete", ignoreCase = true) &&
+                try { isRoomCleared() } catch (_: Exception) { false } ->
+                "Story complete · Search, Rest, or Onward"
+            status.contains("Story complete", ignoreCase = true) -> "Story complete — both acts"
             status.contains("Quest complete", ignoreCase = true) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
                 "Main quest done — Ashen Lantern · Search, Rest, or Onward"
             status.contains("Quest complete", ignoreCase = true) -> "Main quest done — Ashen Lantern"
-            status.contains("Quest: Ashen Lantern", ignoreCase = true) &&
+            (status.contains("Quest: Ashen Lantern", ignoreCase = true) ||
+                status.contains("Quest: Millhollow", ignoreCase = true)) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
                 status.lineSequence().firstOrNull { it.startsWith("Quest:") }?.removePrefix("Quest:")?.trim()
                     ?.let { "Quest · $it · clear" } ?: "Room clear — Search, Rest, or Onward"
+            status.contains("Mode: Dungeon Crawl", ignoreCase = true) &&
+                try { isRoomCleared() } catch (_: Exception) { false } ->
+                "Crawl · Room clear — Search, Rest, or Onward"
             isShop -> "Safe haven — merchant"
             try { isRoomCleared() } catch (_: Exception) { false } -> "Room clear — Search, Rest, or Onward"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
@@ -1680,7 +1800,7 @@ class MainActivity : AppCompatActivity() {
             appendCombatFeed(lastEv)
             if (lastEv.contains("Game Over", ignoreCase = true)) {
                 btnReset.visibility = View.VISIBLE
-                clearSave("game over event")
+                handlePartyWipeUi()
             }
             maybeAnimateFromEvent(lastEv)
             // NPC/enemy AI attacks: show dice when we didn't already schedule from a player tap
@@ -1696,7 +1816,7 @@ class MainActivity : AppCompatActivity() {
             btnHeal.isEnabled = false
             btnRest.isEnabled = false
             btnInteract.isEnabled = false
-            clearSave("game over ui")
+            handlePartyWipeUi()
         }
 
         refreshBattleBackground()
@@ -1764,12 +1884,16 @@ class MainActivity : AppCompatActivity() {
         val room = try { getRoomDescription() } catch (_: Exception) { "" }
         val blob = (status + "\n" + room).lowercase()
         val res = when {
-            blob.contains("millhollow") -> R.drawable.bg_battle_stage_road
-            blob.contains("thornpath") || blob.contains("woods") || blob.contains("forest") ->
+            blob.contains("millhollow green") || blob.contains("debt settled") ->
+                R.drawable.bg_battle_stage_road
+            blob.contains("millhollow") && !blob.contains("debt") -> R.drawable.bg_battle_stage_road
+            blob.contains("thornpath") || blob.contains("woods") || blob.contains("forest") ||
+                blob.contains("millrace") || blob.contains("weir") ->
                 R.drawable.bg_battle_stage_woods
-            blob.contains("bone gallery") || blob.contains("crypt") ->
+            blob.contains("bone gallery") || blob.contains("crypt") || blob.contains("flooded cellar") ->
                 R.drawable.bg_battle_stage_crypt
             blob.contains("lantern vault") || blob.contains("ashen shrine") ||
+                blob.contains("ledger loft") || blob.contains("collector") ||
                 blob.contains("vault") || blob.contains("shrine") ->
                 R.drawable.bg_battle_stage_vault
             else -> R.drawable.bg_battle_stage_dungeon
@@ -2179,6 +2303,71 @@ class MainActivity : AppCompatActivity() {
         }
         joinTimeoutRunnable = r
         handler.postDelayed(r, timeoutMs)
+    }
+
+    private fun currentDifficultyForWipe(): Int {
+        return try {
+            getDifficulty().coerceIn(0, 3)
+        } catch (_: Exception) {
+            if (runDifficulty >= 0) runDifficulty else preferredDifficulty.coerceIn(0, 3)
+        }
+    }
+
+    /** Party fully fallen — show difficulty-correct Continue / Restart. Persist save for Easy–Hard. */
+    private fun handlePartyWipeUi() {
+        if (!sessionActive || wipeDialogShowing) return
+        val d = currentDifficultyForWipe()
+        if (d == 3) {
+            clearSave("nightmare wipe")
+            wipeDialogShowing = true
+            AlertDialog.Builder(this)
+                .setTitle("Game Over — Nightmare")
+                .setMessage("The entire party has fallen. Nightmare difficulty ends the run — stats, gear, and gold are lost.")
+                .setCancelable(false)
+                .setPositiveButton("Main menu") { _, _ ->
+                    wipeDialogShowing = false
+                    runDifficulty = -1
+                    abandonAdventure()
+                }
+                .show()
+            return
+        }
+        try { syncAndSave() } catch (_: Exception) {}
+        wipeDialogShowing = true
+        val title = "Game Over — ${difficultyLabel(d)}"
+        val msg = when (d) {
+            0 -> "Easy: no loss of stats, gear, or gold. Continue revives the party with full HP one chamber back."
+            1 -> "Medium: no loss of stats, gear, or gold. Continue revives with half HP one chamber back."
+            else -> "Hard: stats kept, but gold and gear are stripped to starters. Continue revives one chamber back."
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(msg)
+            .setCancelable(false)
+            .setPositiveButton("Continue") { _, _ ->
+                wipeDialogShowing = false
+                val ok = try { recoverFromPartyWipe() } catch (e: Exception) {
+                    Log.e(TAG, "recoverFromPartyWipe failed", e)
+                    false
+                }
+                if (ok) {
+                    btnReset.visibility = View.GONE
+                    syncAndSave()
+                    updateUi()
+                    Toast.makeText(this, "The party rises…", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Could not Continue — return to menu.", Toast.LENGTH_LONG).show()
+                    clearSave("recover failed")
+                    resetToStartMenu()
+                }
+            }
+            .setNegativeButton("Main menu") { _, _ ->
+                wipeDialogShowing = false
+                clearSave("wipe quit to menu")
+                runDifficulty = -1
+                resetToStartMenu()
+            }
+            .show()
     }
 
     private fun prefs() = getPreferences(MODE_PRIVATE)
