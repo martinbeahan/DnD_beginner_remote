@@ -132,6 +132,12 @@ private:
     void enemyTurn();
     void allyTurn();
     bool isAllyAi(const Character* c) const;
+    // Lightweight combat AI helpers (solo + host-side only).
+    int scoreHeroThreat(const Character& hero, bool partyHasDowned) const;
+    int pickEnemyAiTarget() const;
+    int pickAllyAiEnemyTarget() const;
+    int pickAllyAiHealTarget() const;
+    bool allySpecialBeatsBasic(const Character& actor, const Character& enemy) const;
     void removeFromTurnOrder(Character* c);
     void checkPartyDefeat();
     void advanceTurn();
