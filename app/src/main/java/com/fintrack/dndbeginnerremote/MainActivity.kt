@@ -17,6 +17,8 @@ import android.view.Gravity
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.FirebaseApp
@@ -45,6 +47,18 @@ class MainActivity : AppCompatActivity() {
     private var multiplayer: MultiplayerManager? = null
     private var lastBattleRoster = ""
     private var lastAnimEvent = ""
+    private var selectedEnemyName: String? = null
+    private var selectedAllyName: String? = null
+    private var foeTargetingMode = false
+    private var allyTargetingMode = false
+    private var lastSelectionRoomKey = ""
+    private val combatFeed = ArrayDeque<String>()
+    private var diceOverlayRoot: View? = null
+    private var diceTitle: TextView? = null
+    private var diceD20: TextView? = null
+    private var diceDamage: TextView? = null
+    private var diceSummary: TextView? = null
+    private var diceHideRunnable: Runnable? = null
     private val handler = Handler(Looper.getMainLooper())
     private var uiLoopStarted = false
     private val uiTick = object : Runnable {
@@ -170,24 +184,40 @@ class MainActivity : AppCompatActivity() {
         btnHelp = findViewById(R.id.btnHelp)
         partyColumn = findViewById(R.id.partyColumn)
         enemyColumn = findViewById(R.id.enemyColumn)
+        wireDiceOverlay()
 
         btnAttack.setOnClickListener { 
             Log.d(TAG, "Attack clicked")
             if (isMerchantRoom()) showShopDialog() 
-            else handleActionWithTarget("Attack", isEnemy = true, actionType = "attack") { i ->
-                doAttack(i); animateAttack(true)
+            else resolveTargetedAction(needEnemy = true, actionType = "attack") { i ->
+                doAttack(i); animateAttack(true, targetEnemyIndex = i); scheduleDiceFromLastEvent()
             }
         }
         
         btnSpecial.setOnClickListener {
             Log.d(TAG, "Special clicked")
-            handleActionWithTarget("Special", isEnemy = true, actionType = "special") { i ->
-                doSpecial(i); animateAttack(true)
+            if (isMerchantRoom()) {
+                val blurb = try { getRoomDescription() } catch (_: Exception) { "A merchant greets you." }
+                Toast.makeText(this, blurb, Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            // Cleric Healing Word picks ally internally; still allow foe targeting for other classes.
+            val special = try { getSpecialName() } catch (_: Exception) { "" }
+            if (special.contains("Healing", ignoreCase = true)) {
+                performOrQueue("special", 0) {
+                    doSpecial(0); scheduleDiceFromLastEvent()
+                }
+            } else {
+                resolveTargetedAction(needEnemy = true, actionType = "special") { i ->
+                    doSpecial(i); animateAttack(true, targetEnemyIndex = i); scheduleDiceFromLastEvent()
+                }
             }
         }
         btnHeal.setOnClickListener {
             Log.d(TAG, "Heal clicked")
-            handleActionWithTarget("Heal", isEnemy = false, actionType = "heal") { i -> doHeal(i) }
+            resolveTargetedAction(needEnemy = false, actionType = "heal") { i ->
+                doHeal(i); scheduleDiceFromLastEvent()
+            }
         }
         btnInteract.setOnClickListener {
             Log.d(TAG, "Interact clicked")
@@ -360,30 +390,86 @@ class MainActivity : AppCompatActivity() {
         syncAndSave()
     }
 
+    private fun livingUnits(isEnemy: Boolean): List<Pair<Int, BattleUnit>> {
+        val (party, foes) = parseBattleRoster(try { getBattleRoster() } catch (_: Exception) { "" })
+        val list = if (isEnemy) foes else party
+        return list.mapIndexedNotNull { idx, u ->
+            // Foes: only living. Allies: include 0-HP downed so Potion/heal can target them.
+            if (isEnemy && u.hp <= 0) null else idx to u
+        }
+    }
+
+    private fun resolveSelectedIndex(needEnemy: Boolean): Int? {
+        if (needEnemy) {
+            val name = selectedEnemyName ?: return null
+            return livingUnits(true).firstOrNull { it.second.name == name }?.first
+        }
+        val name = selectedAllyName
+        if (name != null) {
+            livingUnits(false).firstOrNull { it.second.name == name }?.first?.let { return it }
+        }
+        // Potion defaults to self
+        return livingUnits(false).firstOrNull { it.second.name.equals(localPlayerName, true) }?.first
+            ?: livingUnits(false).firstOrNull()?.first
+    }
+
+    private fun clearCombatSelection(reason: String? = null) {
+        selectedEnemyName = null
+        selectedAllyName = null
+        foeTargetingMode = false
+        allyTargetingMode = false
+        if (reason != null) Log.d(TAG, "Cleared selection: $reason")
+        applySelectionHighlights()
+        stopTargetPulse()
+    }
+
+    private fun resolveTargetedAction(needEnemy: Boolean, actionType: String, action: (Int) -> Unit) {
+        val idx = resolveSelectedIndex(needEnemy)
+        if (idx != null) {
+            Log.d(TAG, "Using selected index $idx for $actionType")
+            if (needEnemy) foeTargetingMode = false else allyTargetingMode = false
+            stopTargetPulse()
+            performOrQueue(actionType, idx) {
+                action(idx)
+                // Clear selection after the action resolves
+                if (needEnemy) selectedEnemyName = null else selectedAllyName = null
+                applySelectionHighlights()
+            }
+            return
+        }
+        if (needEnemy) {
+            val living = livingUnits(true)
+            if (living.isEmpty()) {
+                Toast.makeText(this, "No living foes.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            foeTargetingMode = true
+            allyTargetingMode = false
+            startTargetPulse(enemyColumn)
+            Toast.makeText(this, "Tap a foe", Toast.LENGTH_SHORT).show()
+            applySelectionHighlights()
+        } else {
+            val living = livingUnits(false)
+            if (living.isEmpty()) {
+                Toast.makeText(this, "No living allies.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            allyTargetingMode = true
+            foeTargetingMode = false
+            startTargetPulse(partyColumn)
+            Toast.makeText(this, "Tap an ally (or yourself)", Toast.LENGTH_SHORT).show()
+            applySelectionHighlights()
+        }
+    }
+
+    /** Legacy AlertDialog picker retained only as fallback (unused by Attack/Special/Potion). */
     private fun handleActionWithTarget(
         title: String,
         isEnemy: Boolean = true,
         actionType: String,
         action: (Int) -> Unit
     ) {
-        val status = getPlayerStatus()
-        Log.d(TAG, "Targeting for $title. Status: $status")
-        val targets = if (isEnemy) {
-            status.substringAfter("--- Foes ---", "").lines().filter { it.contains("|") }
-        } else {
-            status.lines().takeWhile { !it.contains("--- Foes ---") }.filter { it.contains("|") }
-        }
-
-        if (targets.isEmpty()) {
-            Log.d(TAG, "No targets found for $title, using index 0")
-            performOrQueue(actionType, 0) { action(0) }
-            return
-        }
-
-        AlertDialog.Builder(this).setTitle("Select Target").setItems(targets.toTypedArray()) { _, which ->
-            Log.d(TAG, "Target $which selected for $title")
-            performOrQueue(actionType, which) { action(which) }
-        }.show()
+        resolveTargetedAction(needEnemy = isEnemy, actionType = actionType, action = action)
     }
 
     private fun firebaseReady(): Boolean {
@@ -554,12 +640,14 @@ class MainActivity : AppCompatActivity() {
             "attack" -> {
                 if (!validateActorOrReject(player)) return
                 doAttack(target)
-                animateAttack(true)
+                animateAttack(true, targetEnemyIndex = target)
+                scheduleDiceFromLastEvent()
             }
             "special" -> {
                 if (!validateActorOrReject(player)) return
                 doSpecial(target)
-                animateAttack(true)
+                animateAttack(true, targetEnemyIndex = target)
+                scheduleDiceFromLastEvent()
             }
             "heal" -> {
                 if (!validateActorOrReject(player)) return
@@ -993,12 +1081,78 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCharacterSheet() {
-        val sheet = getDetailedSheet(localPlayerName)
-        val builder = AlertDialog.Builder(this).setTitle("Hero Sheet").setMessage(sheet).setPositiveButton("Close", null)
-        if (sheet.contains("POINTS TO SPEND")) {
-            builder.setNeutralButton("Level Up!") { _, _ -> showStatUpgradeDialog() }
+        if (!nativeReady) return
+        val sheet = try { getDetailedSheet(localPlayerName) } catch (_: Exception) { "Hero not found." }
+        if (sheet.contains("not found", ignoreCase = true)) {
+            Toast.makeText(this, sheet, Toast.LENGTH_SHORT).show()
+            return
         }
-        builder.show()
+        val view = layoutInflater.inflate(R.layout.dialog_character_sheet, null)
+        val portrait = view.findViewById<ImageView>(R.id.sheetPortrait)
+        val nameTv = view.findViewById<TextView>(R.id.sheetName)
+        val classTv = view.findViewById<TextView>(R.id.sheetClass)
+        val goldTv = view.findViewById<TextView>(R.id.sheetGold)
+        val hpLabel = view.findViewById<TextView>(R.id.sheetHpLabel)
+        val hpBar = view.findViewById<ProgressBar>(R.id.sheetHpBar)
+        val resourcesTv = view.findViewById<TextView>(R.id.sheetResources)
+        val equippedTv = view.findViewById<TextView>(R.id.sheetEquipped)
+        val pointsHint = view.findViewById<TextView>(R.id.sheetPointsHint)
+        val levelUpBtn = view.findViewById<Button>(R.id.sheetLevelUp)
+
+        nameTv.text = localPlayerName
+        val lvlLine = sheet.lineSequence().firstOrNull { it.startsWith("Lvl ") }.orEmpty()
+        classTv.text = lvlLine.substringBefore("|").trim().ifBlank { "Hero" }
+        val gold = Regex("""Gold:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: "?"
+        goldTv.text = "Gold: $gold"
+        val hp = Regex("""HP:\s*(\d+)/(\d+)""").find(sheet)
+        val cur = hp?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        val max = hp?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 1
+        val ac = Regex("""AC:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: "?"
+        hpLabel.text = "HP $cur/$max · AC $ac"
+        hpBar.max = max.coerceAtLeast(1)
+        hpBar.progress = cur.coerceIn(0, hpBar.max)
+        hpBar.progressDrawable = getDrawable(R.drawable.bg_hp_bar)?.mutate()
+        val res = Regex("""Resources:\s*(\d+)/(\d+)""").find(sheet)
+        resourcesTv.text = if (res != null) {
+            "Resources: ${res.groupValues[1]}/${res.groupValues[2]}"
+        } else "Resources: —"
+        fun stat(key: String): String {
+            val m = Regex("""$key:\s*(\d+)\s*\(([^)]+)\)""").find(sheet)
+            return if (m != null) "$key ${m.groupValues[1]} (${m.groupValues[2]})" else "$key —"
+        }
+        view.findViewById<TextView>(R.id.sheetStatStr).text = stat("STR")
+        view.findViewById<TextView>(R.id.sheetStatDex).text = stat("DEX")
+        view.findViewById<TextView>(R.id.sheetStatCon).text = stat("CON")
+        view.findViewById<TextView>(R.id.sheetStatInt).text = stat("INT")
+        view.findViewById<TextView>(R.id.sheetStatWis).text = stat("WIS")
+        view.findViewById<TextView>(R.id.sheetStatCha).text = stat("CHA")
+        val weapon = sheet.lineSequence().firstOrNull { it.startsWith("Weapon:") }?.removePrefix("Weapon:")?.trim()
+        val armor = sheet.lineSequence().firstOrNull { it.startsWith("Armor:") }?.removePrefix("Armor:")?.trim()
+        equippedTv.text = buildString {
+            append("Weapon: ${weapon ?: "None"}")
+            append("\nArmor: ${armor ?: "None"}")
+        }
+        portrait.setImageResource(spriteFor(BattleUnit(true, localPlayerName, localClassId, cur, max)))
+        val canLevel = sheet.contains("POINTS TO SPEND")
+        if (canLevel) {
+            val pts = Regex("""POINTS TO SPEND:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: ""
+            pointsHint.visibility = View.VISIBLE
+            pointsHint.text = "You have $pts attribute point(s) to spend."
+            levelUpBtn.visibility = View.VISIBLE
+        } else {
+            pointsHint.visibility = View.GONE
+            levelUpBtn.visibility = View.GONE
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Hero Sheet")
+            .setView(view)
+            .setPositiveButton("Close", null)
+            .create()
+        levelUpBtn.setOnClickListener {
+            dialog.dismiss()
+            showStatUpgradeDialog()
+        }
+        dialog.show()
     }
 
     private fun showStatUpgradeDialog() {
@@ -1012,6 +1166,24 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
+
+    private fun parsePlayerGold(): Int {
+        return try {
+            val sheet = getDetailedSheet(localPlayerName)
+            Regex("""Gold:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        } catch (_: Exception) { 0 }
+    }
+
+    private fun appendCombatFeed(line: String) {
+        val cleaned = line.trim()
+        if (cleaned.isEmpty()) return
+        if (combatFeed.isNotEmpty() && combatFeed.last() == cleaned) return
+        combatFeed.addLast(cleaned)
+        while (combatFeed.size > 6) combatFeed.removeFirst()
+        logText.text = combatFeed.joinToString("\n")
+        val scroll = findViewById<android.widget.ScrollView?>(R.id.combatLogScroll)
+        scroll?.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
 
     private fun showShopDialog() {
         if (!nativeReady) {
@@ -1029,32 +1201,62 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "The merchant has nothing for sale.", Toast.LENGTH_SHORT).show()
             return
         }
-        val labels = entries.map { entry ->
-            val parts = entry.split(':', limit = 2)
-            if (parts.size == 2) parts[1] else entry
-        }.toTypedArray()
-        AlertDialog.Builder(this)
+        val view = layoutInflater.inflate(R.layout.dialog_shop, null)
+        val goldTv = view.findViewById<TextView>(R.id.shopGoldText)
+        val list = view.findViewById<LinearLayout>(R.id.shopItemList)
+        fun refreshGold() {
+            goldTv.text = "Your gold: ${parsePlayerGold()}g"
+        }
+        refreshGold()
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Merchant")
-            .setItems(labels) { _, which ->
-                val entry = entries[which]
-                val index = entry.substringBefore(':').toIntOrNull() ?: which
+            .setView(view)
+            .setNegativeButton("Leave", null)
+            .create()
+        for (entry in entries) {
+            val index = entry.substringBefore(':').toIntOrNull() ?: continue
+            val label = entry.substringAfter(':', entry)
+            val cost = Regex("""\((\d+)g\)""").find(label)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            val name = label.replace(Regex("""\s*\(\d+g\)\s*$"""), "").trim()
+            val row = layoutInflater.inflate(R.layout.item_shop_row, list, false)
+            row.findViewById<TextView>(R.id.shopItemName).text = name
+            row.findViewById<TextView>(R.id.shopItemCost).text = "${cost}g"
+            val buy = row.findViewById<Button>(R.id.shopBuyBtn)
+            fun updateBuyEnabled() {
+                buy.isEnabled = parsePlayerGold() >= cost
+            }
+            updateBuyEnabled()
+            buy.setOnClickListener {
                 if (isOnlineClient) {
                     performOrQueue("buy", index) { }
-                    // performOrQueue already toasts "Sent to the DM…"
-                } else {
-                    val ok = try { doBuyItem(localPlayerName, index) } catch (_: Exception) { false }
-                    if (ok) {
-                        syncAndSave()
-                        Toast.makeText(this, "Bought ${labels[which]}", Toast.LENGTH_SHORT).show()
-                        updateUi()
-                    } else {
-                        val ev = try { getLastEvent() } catch (_: Exception) { "Purchase failed." }
-                        Toast.makeText(this, ev.ifBlank { "Could not buy that." }, Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                    return@setOnClickListener
+                }
+                val ok = try { doBuyItem(localPlayerName, index) } catch (_: Exception) { false }
+                val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                if (ok) {
+                    syncAndSave()
+                    appendCombatFeed(ev.ifBlank { "Bought $name." })
+                    refreshGold()
+                    updateBuyEnabled()
+                    // refresh all buy buttons
+                    for (i in 0 until list.childCount) {
+                        val r = list.getChildAt(i)
+                        val b = r.findViewById<Button>(R.id.shopBuyBtn) ?: continue
+                        val cTxt = r.findViewById<TextView>(R.id.shopItemCost)?.text?.toString().orEmpty()
+                        val c = cTxt.removeSuffix("g").toIntOrNull() ?: 0
+                        b.isEnabled = parsePlayerGold() >= c
                     }
+                    updateUi()
+                } else {
+                    appendCombatFeed(ev.ifBlank { "Could not buy that." })
+                    Toast.makeText(this, ev.ifBlank { "Could not buy that." }, Toast.LENGTH_SHORT).show()
+                    refreshGold()
                 }
             }
-            .setNegativeButton("Leave", null)
-            .show()
+            list.addView(row)
+        }
+        dialog.show()
     }
 
     private fun showJournal() {
@@ -1175,23 +1377,32 @@ class MainActivity : AppCompatActivity() {
             lastRoomDesc = roomDesc
         }
 
+        // Track chat for journal, but never clobber the combat feed with chat last-line.
         val chat = getChatHistory()
         if (chat != lastChatHistory) {
             lastChatHistory = chat
-            if (chat.isNotBlank()) {
-                logText.text = chat.lineSequence().lastOrNull().orEmpty()
-            }
+        }
+
+        val roomKey = try { getRoomDescription().take(40) } catch (_: Exception) { "" } + "|" +
+            (try { getPlayerStatus().lineSequence().firstOrNull { it.startsWith("Room") }.orEmpty() } catch (_: Exception) { "" })
+        if (roomKey != lastSelectionRoomKey) {
+            if (lastSelectionRoomKey.isNotEmpty()) clearCombatSelection("room change")
+            lastSelectionRoomKey = roomKey
         }
 
         val lastEv = getLastEvent()
         if (lastEv.isNotEmpty() && lastEv != lastProcessedEvent) {
-            logText.text = lastEv
             lastProcessedEvent = lastEv
+            appendCombatFeed(lastEv)
             if (lastEv.contains("Game Over", ignoreCase = true)) {
                 btnReset.visibility = View.VISIBLE
                 clearSave("game over event")
             }
             maybeAnimateFromEvent(lastEv)
+            // NPC/enemy AI attacks: show dice when we didn't already schedule from a player tap
+            if (looksLikeCombatRoll(lastEv)) {
+                maybeShowDiceOverlay(lastEv)
+            }
         }
 
         if (isGameOver) {
@@ -1261,20 +1472,48 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshBattleArena() {
         val roster = getBattleRoster()
-        if (roster == lastBattleRoster) return
+        if (roster == lastBattleRoster) {
+            applySelectionHighlights()
+            return
+        }
+        val oldNames = lastBattleRoster
         lastBattleRoster = roster
         val (party, foes) = parseBattleRoster(roster)
-        rebuildColumn(partyColumn, party, alignEnd = false)
-        rebuildColumn(enemyColumn, foes, alignEnd = true)
+        // Structural change (names / count) clears selection; HP-only updates keep name selection.
+        val oldPartyNames = oldNames.substringBefore('|').split(';').mapNotNull { it.split(',').getOrNull(1) }
+        val oldFoeNames = oldNames.substringAfter('|', "").split(';').mapNotNull { it.split(',').getOrNull(1) }
+        val newPartyNames = party.map { it.name }
+        val newFoeNames = foes.map { it.name }
+        if (oldNames.isNotEmpty() && (oldPartyNames != newPartyNames || oldFoeNames != newFoeNames)) {
+            clearCombatSelection("roster membership changed")
+        } else {
+            // Drop selection if the named unit is now dead / gone
+            if (selectedEnemyName != null && foes.none { it.name == selectedEnemyName && it.hp > 0 }) {
+                selectedEnemyName = null
+            }
+            if (selectedAllyName != null && party.none { it.name == selectedAllyName }) {
+                selectedAllyName = null
+            }
+        }
+        rebuildColumn(partyColumn, party, alignEnd = false, isEnemyColumn = false)
+        rebuildColumn(enemyColumn, foes, alignEnd = true, isEnemyColumn = true)
+        applySelectionHighlights()
+        if (foeTargetingMode) startTargetPulse(enemyColumn)
+        if (allyTargetingMode) startTargetPulse(partyColumn)
     }
 
-    private fun rebuildColumn(column: LinearLayout, units: List<BattleUnit>, alignEnd: Boolean) {
+    private fun rebuildColumn(
+        column: LinearLayout,
+        units: List<BattleUnit>,
+        alignEnd: Boolean,
+        isEnemyColumn: Boolean
+    ) {
         column.removeAllViews()
         val density = resources.displayMetrics.density
         val spriteSize = (104 * density).toInt()
         val barW = (88 * density).toInt()
         val barH = (10 * density).toInt()
-        for (unit in units) {
+        units.forEachIndexed { index, unit ->
             val wrap = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = if (alignEnd) Gravity.END else Gravity.START
@@ -1314,8 +1553,81 @@ class MainActivity : AppCompatActivity() {
             wrap.addView(name)
             wrap.addView(bar)
             wrap.addView(hp)
+            val selectable = if (isEnemyColumn) unit.hp > 0 else true
+            if (selectable) {
+                wrap.isClickable = true
+                wrap.isFocusable = true
+                wrap.setOnClickListener {
+                    onBattleUnitTapped(unit.name, index, isEnemyColumn)
+                }
+            } else {
+                wrap.isClickable = false
+                wrap.setOnClickListener(null)
+            }
             column.addView(wrap)
         }
+    }
+
+    private fun onBattleUnitTapped(name: String, index: Int, isEnemy: Boolean) {
+        if (isEnemy) {
+            if (selectedEnemyName == name) {
+                selectedEnemyName = null // retap clears
+            } else {
+                selectedEnemyName = name
+            }
+            foeTargetingMode = false
+            stopTargetPulse()
+            applySelectionHighlights()
+            Toast.makeText(this, "Target: $name", Toast.LENGTH_SHORT).show()
+        } else {
+            if (selectedAllyName == name) {
+                selectedAllyName = null
+            } else {
+                selectedAllyName = name
+            }
+            allyTargetingMode = false
+            stopTargetPulse()
+            applySelectionHighlights()
+            Toast.makeText(this, "Ally: $name", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun applySelectionHighlights() {
+        fun paint(column: LinearLayout, selected: String?) {
+            for (i in 0 until column.childCount) {
+                val child = column.getChildAt(i)
+                val selectedHere = selected != null && child.tag == selected
+                child.background = if (selectedHere) getDrawable(R.drawable.bg_sprite_selected) else null
+            }
+        }
+        paint(partyColumn, selectedAllyName)
+        paint(enemyColumn, selectedEnemyName)
+    }
+
+    private fun startTargetPulse(column: LinearLayout) {
+        stopTargetPulse()
+        for (i in 0 until column.childCount) {
+            val child = column.getChildAt(i)
+            val img = child.findViewWithTag<ImageView?>("sprite") ?: continue
+            if (img.alpha < 0.5f) continue
+            val anim = AlphaAnimation(0.45f, 1f).apply {
+                duration = 550
+                repeatMode = Animation.REVERSE
+                repeatCount = Animation.INFINITE
+            }
+            img.startAnimation(anim)
+        }
+    }
+
+    private fun stopTargetPulse() {
+        fun clear(column: LinearLayout) {
+            for (i in 0 until column.childCount) {
+                val img = column.getChildAt(i).findViewWithTag<ImageView?>("sprite")
+                img?.clearAnimation()
+            }
+        }
+        clear(partyColumn)
+        clear(enemyColumn)
     }
 
     private fun findSpriteByName(column: LinearLayout, name: String): ImageView? {
@@ -1337,11 +1649,21 @@ class MainActivity : AppCompatActivity() {
         return column.getChildAt(0).findViewWithTag("sprite") as? ImageView
     }
 
-    private fun animateAttack(attackerIsPlayer: Boolean) {
+    private fun animateAttack(attackerIsPlayer: Boolean, targetEnemyIndex: Int? = null, targetAllyIndex: Int? = null) {
         val attackerCol = if (attackerIsPlayer) partyColumn else enemyColumn
         val defenderCol = if (attackerIsPlayer) enemyColumn else partyColumn
         val a = firstSprite(attackerCol) ?: return
-        val defendView = firstSprite(defenderCol)
+        val defendView = when {
+            attackerIsPlayer && targetEnemyIndex != null && targetEnemyIndex < enemyColumn.childCount ->
+                enemyColumn.getChildAt(targetEnemyIndex).findViewWithTag<ImageView?>("sprite")
+            !attackerIsPlayer && targetAllyIndex != null && targetAllyIndex < partyColumn.childCount ->
+                partyColumn.getChildAt(targetAllyIndex).findViewWithTag<ImageView?>("sprite")
+            selectedEnemyName != null && attackerIsPlayer ->
+                findSpriteByName(enemyColumn, selectedEnemyName!!)
+            selectedAllyName != null && !attackerIsPlayer ->
+                findSpriteByName(partyColumn, selectedAllyName!!)
+            else -> firstSprite(defenderCol)
+        }
         val dx = if (attackerIsPlayer) 90f else -90f
         a.animate().cancel()
         a.translationX = 0f
@@ -1368,16 +1690,97 @@ class MainActivity : AppCompatActivity() {
         lastAnimEvent = event
         val e = event.lowercase()
         when {
-            e.contains("attacks") || e.contains("hits") || e.contains("slashes") || e.contains("fireball") || e.contains("sneak") || e.contains("action surge") -> {
-                val playerSide = e.contains(localPlayerName.lowercase()) || e.contains("you ") || e.contains("party")
-                // If event mentions goblin/skeleton attacking, enemy side
-                val enemyAttack = e.contains("goblin") || e.contains("skeleton")
-                animateAttack(attackerIsPlayer = !(enemyAttack && !playerSide))
+            e.contains("attacks") || e.contains("hits") || e.contains("slashes") || e.contains("fireball") || e.contains("sneak") || e.contains("action surge") || e.contains("magic missile") -> {
+                val playerSide = e.contains(localPlayerName.lowercase()) || e.contains("you ")
+                val enemyAttack = (e.contains("goblin") || e.contains("skeleton")) && !playerSide
+                animateAttack(attackerIsPlayer = !enemyAttack)
             }
             e.contains("damage") || e.contains("struck") || e.contains("wounded") -> {
                 animateAttack(attackerIsPlayer = true)
             }
         }
+    }
+
+    private fun wireDiceOverlay() {
+        val root = findViewById<View?>(R.id.diceOverlayRoot) ?: return
+        diceOverlayRoot = root
+        diceTitle = root.findViewById(R.id.diceTitle)
+        diceD20 = root.findViewById(R.id.diceD20)
+        diceDamage = root.findViewById(R.id.diceDamage)
+        diceSummary = root.findViewById(R.id.diceSummary)
+        root.visibility = View.GONE
+    }
+
+    private fun looksLikeCombatRoll(event: String): Boolean {
+        val e = event.lowercase()
+        return e.contains("d20=") || e.contains("damage") || e.contains("miss!") ||
+            e.contains("magic missile") || e.contains("healing") || e.contains("potion")
+    }
+
+    private var lastDiceEvent = ""
+    private fun scheduleDiceFromLastEvent() {
+        handler.postDelayed({
+            val ev = try { getLastEvent() } catch (_: Exception) { "" }
+            if (ev.isNotBlank()) maybeShowDiceOverlay(ev, force = true)
+        }, 80)
+    }
+
+    private fun maybeShowDiceOverlay(event: String, force: Boolean = false) {
+        if (!force && event == lastDiceEvent) return
+        if (!looksLikeCombatRoll(event)) return
+        lastDiceEvent = event
+        showDiceOverlay(event)
+    }
+
+    private fun showDiceOverlay(event: String) {
+        val root = diceOverlayRoot ?: return
+        val d20Match = Regex("""d20=(\d+)""").find(event)
+        val dmgMatch = Regex("""(?i)(?:Damage|deal(?:s)?|for)\s+(\d+)""").find(event)
+        val miss = event.contains("Miss!", ignoreCase = true)
+        val crit = event.contains("CRITICAL", ignoreCase = true)
+        diceTitle?.text = when {
+            event.contains("Magic Missile", ignoreCase = true) -> "Magic Missile"
+            event.contains("Potion", ignoreCase = true) || event.contains("Healing", ignoreCase = true) -> "Healing"
+            miss -> "Attack — Miss"
+            crit -> "Critical Hit!"
+            d20Match != null -> "Attack Roll"
+            else -> "Combat"
+        }
+        if (d20Match != null) {
+            diceD20?.visibility = View.VISIBLE
+            diceD20?.text = d20Match.groupValues[1]
+        } else if (event.contains("Magic Missile", ignoreCase = true)) {
+            diceD20?.visibility = View.VISIBLE
+            diceD20?.text = "auto"
+        } else if (event.contains("Potion", ignoreCase = true) || event.contains("Healing", ignoreCase = true)) {
+            diceD20?.visibility = View.VISIBLE
+            diceD20?.text = "♥"
+        } else {
+            diceD20?.visibility = View.VISIBLE
+            diceD20?.text = "—"
+        }
+        if (dmgMatch != null && !miss) {
+            diceDamage?.visibility = View.VISIBLE
+            diceDamage?.text = dmgMatch.groupValues[1]
+        } else {
+            diceDamage?.visibility = View.GONE
+        }
+        val summary = event.let { if (it.length > 120) it.take(117) + "…" else it }
+        diceSummary?.text = summary
+        root.isClickable = false
+        root.isFocusable = false
+        root.visibility = View.VISIBLE
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(120).start()
+        diceHideRunnable?.let { handler.removeCallbacks(it) }
+        val holdMs = 1400L
+        val hide = Runnable {
+            root.animate().alpha(0f).setDuration(200).withEndAction {
+                root.visibility = View.GONE
+            }.start()
+        }
+        diceHideRunnable = hide
+        handler.postDelayed(hide, holdMs)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -1484,8 +1887,8 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "coach chat failed: ${e.message}")
         }
-        // Also surface in the on-screen log immediately
-        logText.text = "$tip\n${logText.text}"
+        // Surface coach tips in the lasting combat feed (not a flicker overwrite)
+        appendCombatFeed(tip)
     }
 
     private fun maybeSoloDmCoach(status: String, isShop: Boolean) {
