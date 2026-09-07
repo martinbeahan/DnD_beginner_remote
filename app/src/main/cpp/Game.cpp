@@ -392,30 +392,50 @@ void Game::allyTurn() {
         return;
     }
 
-    int target = -1;
-    for (size_t i = 0; i < enemies_.size(); ++i) {
-        if (enemies_[i] && enemies_[i]->currentHp > 0 && !enemies_[i]->isDowned) {
-            target = static_cast<int>(i);
-            break;
+    const std::string actorUid = actor->uid;
+    const int roomBefore = roomCount_;
+
+    // 1) Heal a downed / critically hurt ally when we can (potion or Cleric Healing Word).
+    const int healIdx = pickAllyAiHealTarget();
+    if (healIdx >= 0 && actor->resources > 0) {
+        if (actor->characterClass == CharacterClass::CLERIC) {
+            dmSay(actor->name + " calls a Healing Word for a wounded ally.");
+            playerSpecialAction(0); // Cleric special ignores enemy index; heals lowest HP
+        } else {
+            dmSay(actor->name + " spends a potion on a wounded ally.");
+            playerHeal(healIdx);
         }
+        if (roomCount_ != roomBefore) return;
+        Character* now = getCurrentActor();
+        if (now && now->uid == actorUid) advanceTurn();
+        return;
     }
+
+    // 2) Pick a living foe — prefer finishing blows / focus fire.
+    const int target = pickAllyAiEnemyTarget();
     if (target < 0) {
-        // Only corpses left — clean them up; initiative refresh happens inside.
         purgeDownedEnemies();
         return;
     }
 
-    // Remember who is acting; playerAttack may no-op or rebuild without advancing.
-    const std::string actorUid = actor->uid;
-    const int roomBefore = roomCount_;
+    Character& enemy = *enemies_[static_cast<size_t>(target)];
+
+    // 3) Class special when it clearly beats a basic swing and we have a use left.
+    if (actor->resources > 0 && actor->characterClass != CharacterClass::CLERIC
+        && allySpecialBeatsBasic(*actor, enemy)) {
+        dmSay(actor->name + " uses " + actor->getSpecialAbilityName() + "!");
+        playerSpecialAction(target);
+        if (roomCount_ != roomBefore) return;
+        Character* now = getCurrentActor();
+        if (now && now->uid == actorUid) advanceTurn();
+        return;
+    }
+
+    // 4) Basic weapon attack — only with a validated living target (no playerAttack no-ops).
     playerAttack(target);
-
-    // New room from a wipe: rollInitiative already picked the next actor.
     if (roomCount_ != roomBefore) return;
-
     Character* now = getCurrentActor();
     if (now && now->uid == actorUid) {
-        // Attack no-op'd or kill-rebuild left this ally current — spend the turn.
         advanceTurn();
     }
 }
@@ -788,55 +808,188 @@ void Game::playerIncreaseStat(const std::string& playerName, int statIndex) {
     if (hero) hero->increaseAttribute(statIndex);
 }
 
+int Game::scoreHeroThreat(const Character& hero, bool partyHasDowned) const {
+    if (hero.isDead) return -100000;
+    int score = 0;
+    if (hero.isDowned) {
+        // Only chosen when no upright heroes remain — finish unstable first.
+        score = 20 + hero.deathSaveFailures * 25;
+        if (!hero.isStable) score += 15;
+        return score;
+    }
+    // Living threats: prefer low HP (focus fire / finish) and pressure when someone is already down.
+    score = 100;
+    score += (hero.maxHp - hero.currentHp) * 4;
+    if (hero.maxHp > 0 && hero.currentHp * 3 <= hero.maxHp) score += 35; // critically low
+    if (hero.currentHp <= 4) score += 25; // easy finish
+    if (partyHasDowned) score += 20; // "downed-adjacent" pressure on remaining fighters
+    return score;
+}
+
+int Game::pickEnemyAiTarget() const {
+    bool partyHasDowned = false;
+    for (const auto& p : players_) {
+        if (p && !p->isDead && p->isDowned) { partyHasDowned = true; break; }
+    }
+
+    int bestUp = -1, bestUpScore = -100000;
+    int bestDown = -1, bestDownScore = -100000;
+    for (size_t i = 0; i < players_.size(); ++i) {
+        const Character* p = players_[i].get();
+        if (!p || p->isDead) continue;
+        int s = scoreHeroThreat(*p, partyHasDowned);
+        if (p->isDowned) {
+            if (s > bestDownScore) { bestDownScore = s; bestDown = static_cast<int>(i); }
+        } else {
+            if (s > bestUpScore) { bestUpScore = s; bestUp = static_cast<int>(i); }
+        }
+    }
+    if (bestUp >= 0) return bestUp;
+    return bestDown;
+}
+
+int Game::pickAllyAiEnemyTarget() const {
+    int best = -1;
+    int bestScore = -100000;
+    for (size_t i = 0; i < enemies_.size(); ++i) {
+        const Character* e = enemies_[i].get();
+        if (!e || e->currentHp <= 0 || e->isDowned || e->isDead) continue;
+        // Prefer finishing weak foes (focus fire).
+        int score = 50 + (e->maxHp - e->currentHp) * 5;
+        if (e->currentHp <= 6) score += 40;
+        if (e->maxHp > 0 && e->currentHp * 3 <= e->maxHp) score += 20;
+        // Slight bias toward lower AC (easier to hit with a basic attack).
+        score += std::max(0, 16 - e->armorClass);
+        if (score > bestScore) {
+            bestScore = score;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+int Game::pickAllyAiHealTarget() const {
+    int best = -1;
+    int bestScore = -100000;
+    for (size_t i = 0; i < players_.size(); ++i) {
+        const Character* p = players_[i].get();
+        if (!p || p->isDead) continue;
+        int score = 0;
+        if (p->isDowned) {
+            score = 200 + p->deathSaveFailures * 30; // revive / stabilize urgency
+        } else if (p->maxHp > 0 && p->currentHp * 3 <= p->maxHp) {
+            score = 80 + (p->maxHp - p->currentHp); // critically low
+        } else if (p->currentHp <= 4 && p->currentHp < p->maxHp) {
+            score = 60;
+        } else {
+            continue; // healthy enough — do not burn a heal
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+bool Game::allySpecialBeatsBasic(const Character& actor, const Character& enemy) const {
+    if (actor.resources <= 0) return false;
+    // Expected basic hit damage is modest and can miss; specials are stronger or auto-hit.
+    const int hp = enemy.currentHp;
+    switch (actor.characterClass) {
+        case CharacterClass::WIZARD:
+            // Magic Missile auto-hits (~10.5 avg) — clearly better than a staff swing, especially to finish or vs high AC.
+            return hp <= 12 || enemy.armorClass >= 13 || actor.resources >= 2;
+        case CharacterClass::FIGHTER:
+            // Action Surge = two attacks; worth it vs chunky foes or to secure a finish.
+            return hp > 8 || (hp > 4 && actor.resources >= 2);
+        case CharacterClass::ROGUE:
+            // Sneak Attack adds dice — almost always better than a plain swing when a use remains.
+            return true;
+        case CharacterClass::CLERIC:
+            // Healing Word is a heal, not an attack special.
+            return false;
+    }
+    return false;
+}
+
 void Game::enemyTurn() {
     if (enemies_.empty() || players_.empty()) return;
     Character* enemy = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    int enemyIdx = 0;
-    for(size_t i=0; i<enemies_.size(); ++i) if(enemies_[i].get() == enemy) enemyIdx = static_cast<int>(i);
+    if (!enemy || enemy->isDowned || enemy->isDead || enemy->currentHp <= 0) return;
 
-    std::vector<int> validTargets;
-    // Prefer living upright heroes; if none, hit downed/stable (adds failures) but never the already-dead.
-    for(size_t i=0; i<players_.size(); ++i) {
-        if (!players_[i]->isDead && !players_[i]->isDowned) validTargets.push_back(static_cast<int>(i));
+    int enemyIdx = 0;
+    for (size_t i = 0; i < enemies_.size(); ++i) {
+        if (enemies_[i].get() == enemy) enemyIdx = static_cast<int>(i);
     }
-    if (validTargets.empty()) {
-        for(size_t i=0; i<players_.size(); ++i) {
-            if (!players_[i]->isDead) validTargets.push_back(static_cast<int>(i));
-        }
-    }
-    if (validTargets.empty()) {
+
+    const int targetIdx = pickEnemyAiTarget();
+    if (targetIdx < 0) {
         checkPartyDefeat();
         return;
     }
 
-    int targetIdx = validTargets[static_cast<size_t>(getRandomInt(0, static_cast<int>(validTargets.size()) - 1))];
     Character& hero = *players_[static_cast<size_t>(targetIdx)];
-
-    pushVisualEvent(VisualEventType::ENEMY_ATTACK, enemyIdx);
-    RollResult result = CombatSystem::performAttackRoll(*enemy);
-    bool hit = (result.total >= hero.armorClass || result.isCriticalHit) && !result.isCriticalFail;
-    if (hit) {
-        int dmg = CombatSystem::calculateDamage(*enemy, result.isCriticalHit);
-        bool wasDowned = hero.isDowned || hero.isStable;
-        // While dying, a critical hit counts as two death-save failures (5e).
-        hero.takeDamage(dmg, wasDowned && result.isCriticalHit);
-        pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
-        lastEvent_ = enemy->name + " attacks " + hero.name + " for " + std::to_string(dmg) + " damage!";
-        addChatMessage("Combat", lastEvent_);
-        if (hero.isDead) {
-            dmSay(hero.name + " is slain!");
-            removeFromTurnOrder(&hero);
-            checkPartyDefeat();
-        } else if (!wasDowned && hero.isDowned) {
-            dmSay(hero.name + " drops! Death saving throws will follow on their turns.");
-        } else if (wasDowned && hero.isDowned) {
-            dmSay(hero.name + " takes a death-save failure from the blow" +
-                 (result.isCriticalHit ? " (critical — two failures)!" : "."));
-        }
-    } else {
-        lastEvent_ = enemy->name + " misses " + hero.name + "!";
-        addChatMessage("Combat", lastEvent_);
+    // Light DM color when the AI focuses a wounded or dying target.
+    if (!hero.isDead && (hero.isDowned || hero.currentHp * 3 <= hero.maxHp)) {
+        dmSay(enemy->name + " smells blood and focuses on " + hero.name + "!");
     }
+
+    // Simple specials: spend a resource when it clearly beats a basic swing.
+    const bool canSpecial = enemy->resources > 0;
+    const bool finishThreat = hero.isDowned || hero.currentHp * 2 <= hero.maxHp;
+    const bool fighterBurst = enemy->characterClass == CharacterClass::FIGHTER
+        && hero.currentHp > 6 && !hero.isDowned;
+    const bool rogueSneak = enemy->characterClass == CharacterClass::ROGUE
+        && (finishThreat || hero.armorClass >= 14);
+    const bool useSpecial = canSpecial && (finishThreat || fighterBurst || rogueSneak);
+
+    auto doOneAttack = [&](bool sneak) {
+        pushVisualEvent(VisualEventType::ENEMY_ATTACK, enemyIdx);
+        RollResult result = CombatSystem::performAttackRoll(*enemy);
+        bool hit = (result.total >= hero.armorClass || result.isCriticalHit) && !result.isCriticalFail;
+        if (hit) {
+            int extra = sneak ? enemy->sneakAttackDice() : 0;
+            int dmg = CombatSystem::calculateDamage(*enemy, result.isCriticalHit, extra, 6);
+            bool wasDowned = hero.isDowned || hero.isStable;
+            hero.takeDamage(dmg, wasDowned && result.isCriticalHit);
+            pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
+            lastEvent_ = enemy->name + " attacks " + hero.name + " for " + std::to_string(dmg) + " damage!";
+            if (sneak) lastEvent_ += " (Sneak Attack)";
+            addChatMessage("Combat", lastEvent_);
+            if (hero.isDead) {
+                dmSay(hero.name + " is slain!");
+                removeFromTurnOrder(&hero);
+                checkPartyDefeat();
+            } else if (!wasDowned && hero.isDowned) {
+                dmSay(hero.name + " drops! Death saving throws will follow on their turns.");
+            } else if (wasDowned && hero.isDowned) {
+                dmSay(hero.name + " takes a death-save failure from the blow" +
+                     (result.isCriticalHit ? " (critical — two failures)!" : "."));
+            }
+        } else {
+            lastEvent_ = enemy->name + " misses " + hero.name + "!";
+            addChatMessage("Combat", lastEvent_);
+        }
+        return hero.isDead;
+    };
+
+    if (useSpecial && enemy->characterClass == CharacterClass::FIGHTER) {
+        enemy->resources--;
+        dmSay(enemy->name + " surges with a brutal flurry!");
+        if (!doOneAttack(false) && hero.currentHp > 0 && !hero.isDead) {
+            doOneAttack(false);
+        }
+        return;
+    }
+    if (useSpecial && enemy->characterClass == CharacterClass::ROGUE) {
+        enemy->resources--;
+        dmSay(enemy->name + " strikes from an angle — Sneak Attack!");
+        doOneAttack(true);
+        return;
+    }
+
+    doOneAttack(false);
 }
 
 void Game::addChatMessage(const std::string& sender, const std::string& message) {
