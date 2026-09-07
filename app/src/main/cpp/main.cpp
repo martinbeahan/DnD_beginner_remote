@@ -173,6 +173,24 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_isInCombat(JNIEnv *env, jobject
     return g_Game.isInCombat() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_isRoomCleared(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.isRoomCleared() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_hasSearchedRoom(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.hasSearchedRoom() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doAdvanceRoom(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.playerAdvanceFromCleared();
+}
+
 JNIEXPORT void JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_doAttack(JNIEnv *env, jobject thiz, jint targetIndex) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);

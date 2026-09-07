@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSheet: Button
     private lateinit var btnJournal: Button
     private lateinit var btnHelp: Button
+    private lateinit var btnInGameSettings: Button
     private lateinit var partyColumn: LinearLayout
     private lateinit var enemyColumn: LinearLayout
     
@@ -155,6 +156,9 @@ class MainActivity : AppCompatActivity() {
     external fun doIncreaseStat(playerName: String, statIndex: Int)
     external fun doBuyItem(playerName: String, itemIndex: Int): Boolean
     external fun isInCombat(): Boolean
+    external fun isRoomCleared(): Boolean
+    external fun hasSearchedRoom(): Boolean
+    external fun doAdvanceRoom()
     external fun setHost(isHost: Boolean)
     external fun addRemoteAlly(characterClass: Int, playerName: String)
     external fun sendChatMessage(sender: String, message: String)
@@ -206,6 +210,7 @@ class MainActivity : AppCompatActivity() {
         btnSheet = findViewById(R.id.btnSheet)
         btnJournal = findViewById(R.id.btnJournal)
         btnHelp = findViewById(R.id.btnHelp)
+        btnInGameSettings = findViewById(R.id.btnInGameSettings)
         partyColumn = findViewById(R.id.partyColumn)
         enemyColumn = findViewById(R.id.enemyColumn)
         wireDiceOverlay()
@@ -213,8 +218,16 @@ class MainActivity : AppCompatActivity() {
 
         btnAttack.setOnClickListener { 
             Log.d(TAG, "Attack clicked")
-            if (isMerchantRoom()) showShopDialog() 
-            else resolveTargetedAction(needEnemy = true, actionType = "attack") { i ->
+            if (isMerchantRoom()) {
+                showShopDialog()
+                return@setOnClickListener
+            }
+            val cleared = try { isRoomCleared() } catch (_: Exception) { false }
+            if (cleared) {
+                performOrQueue("advance", 0) { doAdvanceRoom() }
+                return@setOnClickListener
+            }
+            resolveTargetedAction(needEnemy = true, actionType = "attack") { i ->
                 doAttack(i); animateAttack(true, targetEnemyIndex = i); scheduleDiceFromLastEvent()
             }
         }
@@ -246,6 +259,16 @@ class MainActivity : AppCompatActivity() {
         }
         btnInteract.setOnClickListener {
             Log.d(TAG, "Interact clicked")
+            val inCombat = try { isInCombat() } catch (_: Exception) { false }
+            if (inCombat) {
+                Toast.makeText(this, "Clear the room before Searching.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val searched = try { hasSearchedRoom() } catch (_: Exception) { false }
+            if (searched) {
+                Toast.makeText(this, "Already searched this room.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             performOrQueue("interact", 0) { doInteract(localPlayerName) }
         }
         btnRest.setOnClickListener {
@@ -274,6 +297,10 @@ class MainActivity : AppCompatActivity() {
         }
         btnJournal.setOnClickListener { showJournal() }
         btnHelp.setOnClickListener { showHelpMenu() }
+        btnInGameSettings.setOnClickListener {
+            try { gameAudio?.playUiClick() } catch (_: Exception) {}
+            showSettingsOverlay()
+        }
         btnReset.setOnClickListener { resetToStartMenu() }
         btnReset.text = "Menu"
 
@@ -407,6 +434,22 @@ class MainActivity : AppCompatActivity() {
                 btnReset.visibility = View.VISIBLE
                 clearSave("blocked action after death")
                 return
+            }
+            val localDown = st.lineSequence().any {
+                it.contains(localPlayerName) && (
+                    it.contains("[DOWN]", ignoreCase = true) ||
+                    it.contains("[DEAD]", ignoreCase = true) ||
+                    it.contains("[STABLE]", ignoreCase = true)
+                )
+            }
+            // Downed/dead heroes never attack/search/heal; party Rest/Onward after a clear may continue.
+            val clearedNow = try { isRoomCleared() } catch (_: Exception) { false }
+            if (localDown) {
+                val partyContinue = clearedNow && actionType in setOf("rest", "advance")
+                if (!partyContinue && actionType in setOf("attack", "special", "heal", "interact", "rest", "advance")) {
+                    Toast.makeText(this, "You're down — wait for a heal or Game Over.", Toast.LENGTH_SHORT).show()
+                    return
+                }
             }
         } catch (_: Exception) {}
         if (isOnlineClient) {
@@ -705,7 +748,16 @@ class MainActivity : AppCompatActivity() {
             }
             "interact" -> {
                 if (!validateActorOrReject(player)) return
+                val inCombat = try { isInCombat() } catch (_: Exception) { false }
+                if (inCombat) {
+                    Toast.makeText(this, "Clear the room before Searching.", Toast.LENGTH_SHORT).show()
+                    return
+                }
                 doInteract(player)
+            }
+            "advance" -> {
+                if (!validateActorOrReject(player)) return
+                doAdvanceRoom()
             }
             "buy" -> doBuyItem(player, target)
             "levelup", "increaseStat" -> doIncreaseStat(player, statIndex)
@@ -1498,6 +1550,7 @@ class MainActivity : AppCompatActivity() {
             isOnlineHost -> "DM · directing the table"
             isOnlineClient && remoteDmName.isNotBlank() -> "DM: $remoteDmName · $whose"
             isShop -> "Safe haven — merchant"
+            try { isRoomCleared() } catch (_: Exception) { false } -> "Room clear — Search, Rest, or Onward"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
             myTurnBanner -> "Your move, $localPlayerName"
             else -> "$whose acts…"
@@ -1511,11 +1564,18 @@ class MainActivity : AppCompatActivity() {
 
         val specialName = try { getSpecialName() } catch (_: Exception) { "Special" }
         // Two-line labels so text stays visible on narrow / large-font screens
+        val roomCleared = !isShop && try { isRoomCleared() } catch (_: Exception) { false }
+        val searchedRoom = try { hasSearchedRoom() } catch (_: Exception) { false }
         btnSpecial.text = if (isShop) "Info" else "✦\n$specialName"
-        btnAttack.text = if (isShop) "🛒\nShop" else "⚔\nAttack"
+        btnAttack.text = when {
+            isShop -> "🛒\nShop"
+            roomCleared -> "🚪\nOnward"
+            else -> "⚔\nAttack"
+        }
         btnHeal.text = "⚗\nPotion"
         btnRest.text = if (isShop) "Leave" else "🌙\nRest"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
+        btnInteract.text = if (searchedRoom) "🔍\nDone" else "🔍\nSearch"
 
         val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
         if (dmTable) {
@@ -1538,8 +1598,11 @@ class MainActivity : AppCompatActivity() {
                 it.contains("[STABLE]", ignoreCase = true)
             )
         }
+        val clearedForTurn = !isShop && try { isRoomCleared() } catch (_: Exception) { false }
         val isMyTurn = !isGameOver && !localDown && (
-            isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
+            isShop || clearedForTurn ||
+                status.contains("Turn: Safe", ignoreCase = true) ||
+                status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
         )
 
         val dmTableLock = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
@@ -1551,12 +1614,24 @@ class MainActivity : AppCompatActivity() {
             btnInteract.isEnabled = false
         } else {
             val inCombat = try { isInCombat() } catch (_: Exception) { false }
-            btnAttack.isEnabled = isMyTurn
-            btnSpecial.isEnabled = isMyTurn
-            btnHeal.isEnabled = isMyTurn
-            // Short Rest only out of combat (Leave merchant still allowed on Rest button).
-            btnRest.isEnabled = isMyTurn && (isShop || !inCombat)
-            btnInteract.isEnabled = isMyTurn || (isShop && !isGameOver)
+            val cleared = !isShop && try { isRoomCleared() } catch (_: Exception) { false }
+            val searched = try { hasSearchedRoom() } catch (_: Exception) { false }
+            // Cleared chamber uses Turn: Safe — treat like shop exploration for button unlocks.
+            val canAct = isMyTurn || (!isGameOver && !localDown && (isShop || cleared ||
+                status.contains("Turn: Safe", ignoreCase = true)))
+            btnSpecial.isEnabled = canAct && !cleared && !isShop
+            btnHeal.isEnabled = canAct && !cleared && !isShop
+            // Onward / shop after clear even if local hero is downed (party continues).
+            btnAttack.isEnabled = when {
+                isGameOver -> false
+                isShop -> canAct || !localDown
+                cleared -> true
+                else -> canAct && (inCombat || isMyTurn)
+            }
+            // Short Rest out of combat; party Rest may revive a downed local hero after a clear.
+            btnRest.isEnabled = !isGameOver && (isShop || (!inCombat && (canAct || cleared)))
+            // Search only when room clear, once per room (never while downed/dead).
+            btnInteract.isEnabled = canAct && !isShop && cleared && !searched
         }
 
         val roomDesc = getRoomDescription()
@@ -1828,13 +1903,12 @@ class MainActivity : AppCompatActivity() {
     private fun findSpriteByName(column: LinearLayout, name: String): ImageView? {
         for (i in 0 until column.childCount) {
             val child = column.getChildAt(i)
-            if (child.tag == name) {
+            val tag = child.tag?.toString().orEmpty()
+            if (tag.equals(name, ignoreCase = true) || tag.contains(name, ignoreCase = true) ||
+                name.contains(tag, ignoreCase = true)
+            ) {
                 return child.findViewWithTag("sprite") as? ImageView
             }
-        }
-        // fallback: first sprite in column
-        if (column.childCount > 0) {
-            return column.getChildAt(0).findViewWithTag("sprite") as? ImageView
         }
         return null
     }
@@ -1844,10 +1918,19 @@ class MainActivity : AppCompatActivity() {
         return column.getChildAt(0).findViewWithTag("sprite") as? ImageView
     }
 
-    private fun animateAttack(attackerIsPlayer: Boolean, targetEnemyIndex: Int? = null, targetAllyIndex: Int? = null) {
+    private fun animateAttack(
+        attackerIsPlayer: Boolean,
+        targetEnemyIndex: Int? = null,
+        targetAllyIndex: Int? = null,
+        attackerName: String? = null
+    ) {
         val attackerCol = if (attackerIsPlayer) partyColumn else enemyColumn
         val defenderCol = if (attackerIsPlayer) enemyColumn else partyColumn
-        val a = firstSprite(attackerCol) ?: return
+        val a = when {
+            !attackerName.isNullOrBlank() -> findSpriteByName(attackerCol, attackerName)
+                ?: firstSprite(attackerCol)
+            else -> firstSprite(attackerCol)
+        } ?: return
         val defendView = when {
             attackerIsPlayer && targetEnemyIndex != null && targetEnemyIndex < enemyColumn.childCount ->
                 enemyColumn.getChildAt(targetEnemyIndex).findViewWithTag<ImageView?>("sprite")
@@ -1886,10 +1969,19 @@ class MainActivity : AppCompatActivity() {
         val e = event.lowercase()
         when {
             e.contains("attacks") || e.contains("hits") || e.contains("slashes") || e.contains("fireball") || e.contains("sneak") || e.contains("action surge") || e.contains("magic missile") -> {
-                val playerSide = e.contains(localPlayerName.lowercase()) || e.contains("you ")
-                val enemyAttack = (e.contains("goblin") || e.contains("skeleton")) && !playerSide
-                animateAttack(attackerIsPlayer = !enemyAttack)
-                if (enemyAttack) {
+                // Prefer "Attacker attacks Target" so downed local heroes are not animated as attackers.
+                val attackMatch = Regex("""^(.+?)\s+attacks\s+(.+?)(?:!|\.|$)""", RegexOption.IGNORE_CASE)
+                    .find(event.trim())
+                val attackerName = attackMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                val foeNames = listOf("goblin", "skeleton")
+                val attackerIsFoe = foeNames.any { attackerName.lowercase().contains(it) } ||
+                    (attackerName.isBlank() && foeNames.any { e.contains(it) } &&
+                        !e.startsWith(localPlayerName.lowercase()))
+                animateAttack(
+                    attackerIsPlayer = !attackerIsFoe,
+                    attackerName = attackerName.ifBlank { null }
+                )
+                if (attackerIsFoe) {
                     gameAudio?.playGrowl()
                     gameAudio?.playAttack()
                 } else {
@@ -1900,7 +1992,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             e.contains("damage") || e.contains("struck") || e.contains("wounded") -> {
-                animateAttack(attackerIsPlayer = true)
                 gameAudio?.playHit()
             }
         }
