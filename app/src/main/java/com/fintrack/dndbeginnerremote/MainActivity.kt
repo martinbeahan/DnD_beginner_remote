@@ -115,7 +115,8 @@ class MainActivity : AppCompatActivity() {
     external fun doInteract(playerName: String)
     external fun doRest()
     external fun doIncreaseStat(playerName: String, statIndex: Int)
-    external fun doBuyItem(playerName: String, itemIndex: Int)
+    external fun doBuyItem(playerName: String, itemIndex: Int): Boolean
+    external fun isInCombat(): Boolean
     external fun setHost(isHost: Boolean)
     external fun addRemoteAlly(characterClass: Int, playerName: String)
     external fun sendChatMessage(sender: String, message: String)
@@ -194,6 +195,11 @@ class MainActivity : AppCompatActivity() {
         }
         btnRest.setOnClickListener {
             Log.d(TAG, "Rest clicked")
+            val inCombat = try { isInCombat() } catch (_: Exception) { false }
+            if (inCombat && !isMerchantRoom()) {
+                Toast.makeText(this, "Can't Short Rest in the middle of a fight!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             performOrQueue("rest", 0) { doRest() }
         }
 
@@ -213,7 +219,7 @@ class MainActivity : AppCompatActivity() {
         }
         btnJournal.setOnClickListener { showJournal() }
         btnHelp.setOnClickListener { showHelpMenu() }
-        btnReset.setOnClickListener { showStartDialog() }
+        btnReset.setOnClickListener { resetToStartMenu() }
 
         findViewById<View>(R.id.topBar).setOnLongClickListener {
             val sid = getSessionId()
@@ -225,16 +231,18 @@ class MainActivity : AppCompatActivity() {
 
         soloCoachEnabled = prefs().getBoolean("solo_coach_enabled", true)
 
-        // If the last run died mid-frame, drop the save so Continue can't boot-loop a bad state.
+        // Only wipe when a prior *active* session exited uncleanly (crash_guard left true).
+        // Do NOT arm crash_guard merely because the start dialog is shown.
         if (prefs().getBoolean("crash_guard", false)) {
-            Log.w(TAG, "Previous run did not exit cleanly — clearing save_state")
+            Log.w(TAG, "Previous session did not exit cleanly — clearing save_state")
             prefs().edit()
                 .remove("save_state")
                 .putBoolean("crash_guard", false)
+                .remove("was_online_host")
+                .remove("was_online_client")
+                .remove("online_session_id")
                 .apply()
             Toast.makeText(this, "Cleared a broken save from a previous crash.", Toast.LENGTH_LONG).show()
-        } else {
-            prefs().edit().putBoolean("crash_guard", true).apply()
         }
 
         showStartDialog()
@@ -254,11 +262,15 @@ class MainActivity : AppCompatActivity() {
         if (!nativeReady || !sessionActive) return
         try {
             val data = saveGameState()
-            if (data.isNotBlank() && data.contains("|")) {
+            if (data.isNotBlank() && data.contains("|") && !saveIsGameOver(data)) {
                 prefs().edit()
                     .putString("save_state", data)
                     .putString("hero_name", localPlayerName)
                     .putInt("hero_class", localClassId)
+                    .putBoolean("crash_guard", false) // good save written — not an unclean exit
+                    .putBoolean("was_online_host", isOnlineHost)
+                    .putBoolean("was_online_client", isOnlineClient)
+                    .putString("online_session_id", onlineSessionId)
                     .commit()
             }
         } catch (e: Exception) {
@@ -266,6 +278,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    /** Detach Firebase listeners and clear online flags before mode switches / start menu. */
+    private fun detachOnlineSession() {
+        try { multiplayer?.detach() } catch (e: Exception) { Log.w(TAG, "detach failed", e) }
+        multiplayer = null
+        isOnlineHost = false
+        isOnlineClient = false
+        onlineSessionId = ""
+        remoteDmName = ""
+        joinTimeoutRunnable?.let { handler.removeCallbacks(it) }
+        joinTimeoutRunnable = null
+    }
+
+    private var joinTimeoutRunnable: Runnable? = null
+
+    private fun resetToStartMenu() {
+        sessionActive = false
+        detachOnlineSession()
+        prefs().edit().putBoolean("crash_guard", false).apply()
+        showStartDialog()
+    }
+
+    private fun activateSession() {
+        sessionActive = true
+        // Arm crash guard only while a real session is running.
+        prefs().edit().putBoolean("crash_guard", true).apply()
+    }
+
+    private fun currentActorName(): String {
+        return try {
+            val status = getPlayerStatus()
+            val turnLine = status.lineSequence().firstOrNull { it.contains("Turn:") } ?: return ""
+            turnLine.substringAfter("Turn:").trim().substringBefore("|").trim()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /** Host-side: reject actions that aren't from the current actor. */
+    private fun validateActorOrReject(player: String): Boolean {
+        val actor = currentActorName()
+        if (actor.isBlank() || actor.equals("Safe", ignoreCase = true) || actor.equals("None", ignoreCase = true)) {
+            return true // merchant / free moment
+        }
+        if (actor.equals(player, ignoreCase = true)) return true
+        Toast.makeText(this, "Not $player's turn (it's $actor).", Toast.LENGTH_SHORT).show()
+        try { sendChatMessage("System", "Rejected $player's action — current turn is $actor.") } catch (_: Exception) {}
+        return false
+    }
 
     private fun performOrQueue(actionType: String, targetIndex: Int, localApply: () -> Unit) {
         try {
@@ -287,6 +348,7 @@ class MainActivity : AppCompatActivity() {
                 mapOf(
                     "type" to actionType,
                     "targetIndex" to targetIndex,
+                    "statIndex" to targetIndex,
                     "playerName" to localPlayerName,
                     "classId" to localClassId
                 )
@@ -344,10 +406,11 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Firebase needed for online play")
             .setMessage(
                 "Host / Join need Firebase Realtime Database.\n\n" +
-                    "1. Add app/google-services.json from the Firebase console\n" +
-                    "2. Uncomment the Google Services plugin in app/build.gradle.kts\n" +
+                    "1. Place app/google-services.json from the Firebase console (required locally)\n" +
+                    "2. The Google Services plugin is already enabled in app/build.gradle.kts\n" +
                     "3. Enable Realtime Database (see FIREBASE_SETUP.md)\n" +
                     "4. Clean + Rebuild\n\n" +
+                    "Host: enter your DM name only — friends Join and pick a class.\n" +
                     "Solo adventure works without Firebase."
             )
             .setPositiveButton("OK") { _, _ -> then?.invoke() }
@@ -419,6 +482,17 @@ class MainActivity : AppCompatActivity() {
                     lastBattleRoster = ""
                     lastRoomDesc = ""
                     lastChatHistory = ""
+                    // Successful sync from DM — cancel join wait.
+                    if (isOnlineClient) {
+                        joinTimeoutRunnable?.let { handler.removeCallbacks(it) }
+                        joinTimeoutRunnable = null
+                        prefs().edit()
+                            .putBoolean("was_online_client", true)
+                            .putBoolean("was_online_host", false)
+                            .putString("online_session_id", onlineSessionId)
+                            .putBoolean("crash_guard", false)
+                            .apply()
+                    }
                     refreshBattleArena()
                     updateUi()
                 } catch (e: Exception) {
@@ -471,21 +545,41 @@ class MainActivity : AppCompatActivity() {
         val classId = (action["classId"] as? Number)?.toInt()
             ?: action["classId"]?.toString()?.toIntOrNull()
             ?: 0
+        val statIndex = (action["statIndex"] as? Number)?.toInt()
+            ?: action["statIndex"]?.toString()?.toIntOrNull()
+            ?: target
 
         when (type) {
             "join" -> admitPlayer(player, classId)
             "attack" -> {
+                if (!validateActorOrReject(player)) return
                 doAttack(target)
                 animateAttack(true)
             }
             "special" -> {
+                if (!validateActorOrReject(player)) return
                 doSpecial(target)
                 animateAttack(true)
             }
-            "heal" -> doHeal(target)
-            "rest" -> doRest()
-            "interact" -> doInteract(player)
+            "heal" -> {
+                if (!validateActorOrReject(player)) return
+                doHeal(target)
+            }
+            "rest" -> {
+                if (!validateActorOrReject(player)) return
+                val inCombat = try { isInCombat() } catch (_: Exception) { false }
+                if (inCombat) {
+                    Toast.makeText(this, "Can't Short Rest in combat.", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                doRest()
+            }
+            "interact" -> {
+                if (!validateActorOrReject(player)) return
+                doInteract(player)
+            }
             "buy" -> doBuyItem(player, target)
+            "levelup", "increaseStat" -> doIncreaseStat(player, statIndex)
             else -> Log.w(TAG, "Unknown action type: $type")
         }
     }
@@ -503,6 +597,7 @@ class MainActivity : AppCompatActivity() {
                     .putInt("hero_class", localClassId)
                     .putBoolean("crash_guard", false)
                     .putBoolean("was_online_host", isOnlineHost)
+                    .putBoolean("was_online_client", isOnlineClient)
                     .putString("online_session_id", onlineSessionId)
                     .apply()
             }
@@ -558,6 +653,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Native library not ready — can't load save.", Toast.LENGTH_LONG).show()
             return
         }
+        detachOnlineSession()
         val data = livableSavedState() ?: run {
             Toast.makeText(this, "No living adventure to continue — start a new one.", Toast.LENGTH_LONG).show()
             showStartDialog()
@@ -565,13 +661,11 @@ class MainActivity : AppCompatActivity() {
         }
         localPlayerName = heroNameFromSave(data)
         localClassId = prefs().getInt("hero_class", 0)
+        val wasHost = prefs().getBoolean("was_online_host", false)
+        val wasClient = prefs().getBoolean("was_online_client", false)
+        val savedSid = prefs().getString("online_session_id", "")?.trim().orEmpty()
         try {
             loadGameState(data)
-            setHost(true)
-            isOnlineHost = false
-            isOnlineClient = false
-            multiplayer = null
-            onlineSessionId = ""
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load save", e)
             Toast.makeText(this, "Save looked broken — start a new game.", Toast.LENGTH_LONG).show()
@@ -579,7 +673,6 @@ class MainActivity : AppCompatActivity() {
             showStartDialog()
             return
         }
-        sessionActive = true
         lastBattleRoster = ""
         lastRoomDesc = ""
         lastChatHistory = ""
@@ -587,32 +680,92 @@ class MainActivity : AppCompatActivity() {
         lastCoachTip = ""
         lastCoachTurnKey = ""
         val status = try { getPlayerStatus() } catch (_: Exception) { "" }
-        if (!status.contains(localPlayerName) && !status.contains("| HP:")) {
+        if (!status.contains(localPlayerName) && !status.contains("| HP:") && !status.contains("DM:")) {
             Toast.makeText(this, "Save looked empty — starting fresh is safer.", Toast.LENGTH_LONG).show()
             prefs().edit().remove("save_state").apply()
-            sessionActive = false
             showStartDialog()
             return
         }
         if (status.contains("Game Over", ignoreCase = true) || saveIsGameOver(data)) {
             clearSave("continued into game over")
-            sessionActive = false
             Toast.makeText(this, "That adventure already ended. Start a new one.", Toast.LENGTH_LONG).show()
             showStartDialog()
             return
         }
-        btnReset.visibility = View.GONE
+        // Successful deserialize + live status — do not treat as unclean exit.
+        prefs().edit().putBoolean("crash_guard", false).apply()
+
+        val resumeOnline = savedSid.isNotBlank() && (wasHost || wasClient) && firebaseReady()
+        if (resumeOnline && wasHost) {
+            setHost(true)
+            activateSession()
+            prefs().edit().putBoolean("crash_guard", false).apply()
+            btnReset.visibility = View.GONE
+            setupMultiplayer(savedSid, asHost = true)
+            if (!isOnlineHost || multiplayer?.isAvailable != true) {
+                // Fall back to local authority with the loaded state.
+                setHost(true)
+                isOnlineHost = false
+                isOnlineClient = false
+                multiplayer = null
+                onlineSessionId = ""
+                Toast.makeText(this, "Welcome back (offline) — could not resume Host session.", Toast.LENGTH_LONG).show()
+            } else {
+                syncAndSave()
+                Toast.makeText(this, "Welcome back, DM — resumed session $savedSid", Toast.LENGTH_SHORT).show()
+            }
+        } else if (resumeOnline && wasClient) {
+            setHost(false)
+            activateSession()
+            prefs().edit().putBoolean("crash_guard", false).apply()
+            btnReset.visibility = View.GONE
+            setupMultiplayer(savedSid, asHost = false)
+            if (!isOnlineClient || multiplayer?.isAvailable != true) {
+                setHost(true) // keep playing the snapshot solo
+                isOnlineHost = false
+                isOnlineClient = false
+                multiplayer = null
+                onlineSessionId = ""
+                Toast.makeText(this, "Welcome back (offline) — DM session unavailable.", Toast.LENGTH_LONG).show()
+            } else {
+                scheduleJoinTimeout(savedSid, resuming = true)
+                Toast.makeText(this, "Rejoining $savedSid…", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            setHost(true)
+            isOnlineHost = false
+            isOnlineClient = false
+            multiplayer = null
+            onlineSessionId = ""
+            activateSession()
+            // activateSession re-arms crash_guard; clear again after confirmed good load.
+            prefs().edit().putBoolean("crash_guard", false).apply()
+            btnReset.visibility = View.GONE
+            Toast.makeText(this, "Welcome back, $localPlayerName (solo)", Toast.LENGTH_SHORT).show()
+        }
         refreshBattleArena()
         updateUi()
-        Toast.makeText(this, "Welcome back, $localPlayerName (solo)", Toast.LENGTH_SHORT).show()
     }
 
 
     private fun showStartDialog() {
         Log.d(TAG, "Showing start dialog")
+        // Mode switch / Reset: drop any live Firebase listeners first.
+        sessionActive = false
+        detachOnlineSession()
         val saved = livableSavedState()
         val modes = mutableListOf<String>()
-        if (saved != null) modes += "Continue solo save (${heroNameFromSave(saved)})"
+        if (saved != null) {
+            val wasHost = prefs().getBoolean("was_online_host", false)
+            val wasClient = prefs().getBoolean("was_online_client", false)
+            val sid = prefs().getString("online_session_id", "")?.trim().orEmpty()
+            val tag = when {
+                wasHost && sid.isNotBlank() -> "Host $sid"
+                wasClient && sid.isNotBlank() -> "Join $sid"
+                else -> "solo"
+            }
+            modes += "Continue ($tag) — ${heroNameFromSave(saved)}"
+        }
         modes += "Solo adventure"
         modes += "Host online (you are the DM)"
         modes += "Join session"
@@ -677,6 +830,7 @@ class MainActivity : AppCompatActivity() {
             showStartDialog()
             return
         }
+        detachOnlineSession()
         try {
             startDmSession(localPlayerName)
             setHost(true)
@@ -686,14 +840,13 @@ class MainActivity : AppCompatActivity() {
             showStartDialog()
             return
         }
-        sessionActive = true
+        activateSession()
         btnReset.visibility = View.GONE
         val sidNow = try { getSessionId() } catch (_: Exception) { "" }
         setupMultiplayer(sidNow, asHost = true)
         if (!isOnlineHost || multiplayer?.isAvailable != true) {
             Toast.makeText(this, "Could not start online session — check Firebase.", Toast.LENGTH_LONG).show()
-            isOnlineHost = false
-            multiplayer = null
+            detachOnlineSession()
             sessionActive = false
             showFirebaseRequiredDialog { showStartDialog() }
             return
@@ -715,27 +868,30 @@ class MainActivity : AppCompatActivity() {
             localClassId = which
             when (mode) {
                 "solo" -> {
+                    detachOnlineSession()
                     resetGame(which, localPlayerName)
                     setHost(true)
-                    isOnlineHost = false
-                    isOnlineClient = false
-                    multiplayer = null
-                    onlineSessionId = ""
                     maybeOfferTutorialThenCoach()
-                    sessionActive = true
+                    activateSession()
                     btnReset.visibility = View.GONE
                     syncAndSave()
                     updateUi()
                 }
                 "join" -> {
+                    detachOnlineSession()
                     setHost(false)
                     try { prepareClientJoin() } catch (e: Exception) {
                         Log.e(TAG, "prepareClientJoin failed", e)
                     }
-                    sessionActive = true
+                    activateSession()
                     btnReset.visibility = View.GONE
                     lastBattleRoster = ""
                     setupMultiplayer(sid, asHost = false)
+                    if (multiplayer?.isAvailable != true) {
+                        Toast.makeText(this, "Could not connect — check Firebase.", Toast.LENGTH_LONG).show()
+                        resetToStartMenu()
+                        return@setItems
+                    }
                     multiplayer?.publishLobbyJoin(localPlayerName, which)
                     multiplayer?.pushAction(
                         mapOf(
@@ -745,6 +901,7 @@ class MainActivity : AppCompatActivity() {
                             "targetIndex" to 0
                         )
                     )
+                    scheduleJoinTimeout(sid, resuming = false)
                     updateUi()
                     Toast.makeText(
                         this,
@@ -847,8 +1004,11 @@ class MainActivity : AppCompatActivity() {
     private fun showStatUpgradeDialog() {
         val stats = arrayOf("Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma")
         AlertDialog.Builder(this).setTitle("Spend Point").setItems(stats) { _, which ->
-            doIncreaseStat(localPlayerName, which)
-            syncAndSave()
+            performOrQueue("levelup", which) {
+                doIncreaseStat(localPlayerName, which)
+            }
+            // Clients already toast "Sent to the DM…"; host/solo get sync via performOrQueue.
+            if (!isOnlineClient) updateUi()
         }.show()
     }
 
@@ -878,8 +1038,20 @@ class MainActivity : AppCompatActivity() {
             .setItems(labels) { _, which ->
                 val entry = entries[which]
                 val index = entry.substringBefore(':').toIntOrNull() ?: which
-                performOrQueue("buy", index) { doBuyItem(localPlayerName, index) }
-                Toast.makeText(this, "Bought ${labels[which]}", Toast.LENGTH_SHORT).show()
+                if (isOnlineClient) {
+                    performOrQueue("buy", index) { }
+                    // performOrQueue already toasts "Sent to the DM…"
+                } else {
+                    val ok = try { doBuyItem(localPlayerName, index) } catch (_: Exception) { false }
+                    if (ok) {
+                        syncAndSave()
+                        Toast.makeText(this, "Bought ${labels[which]}", Toast.LENGTH_SHORT).show()
+                        updateUi()
+                    } else {
+                        val ev = try { getLastEvent() } catch (_: Exception) { "Purchase failed." }
+                        Toast.makeText(this, ev.ifBlank { "Could not buy that." }, Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
             .setNegativeButton("Leave", null)
             .show()
@@ -970,7 +1142,11 @@ class MainActivity : AppCompatActivity() {
 
         val isGameOver = status.contains("Game Over", ignoreCase = true)
         val localDown = status.lineSequence().any {
-            it.contains(localPlayerName) && it.contains("[DOWN]", ignoreCase = true)
+            it.contains(localPlayerName) && (
+                it.contains("[DOWN]", ignoreCase = true) ||
+                it.contains("[DEAD]", ignoreCase = true) ||
+                it.contains("[STABLE]", ignoreCase = true)
+            )
         }
         val isMyTurn = !isGameOver && !localDown && (
             isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
@@ -984,10 +1160,12 @@ class MainActivity : AppCompatActivity() {
             btnRest.isEnabled = false
             btnInteract.isEnabled = false
         } else {
+            val inCombat = try { isInCombat() } catch (_: Exception) { false }
             btnAttack.isEnabled = isMyTurn
             btnSpecial.isEnabled = isMyTurn
             btnHeal.isEnabled = isMyTurn
-            btnRest.isEnabled = isMyTurn
+            // Short Rest only out of combat (Leave merchant still allowed on Rest button).
+            btnRest.isEnabled = isMyTurn && (isShop || !inCombat)
             btnInteract.isEnabled = isMyTurn || (isShop && !isGameOver)
         }
 
@@ -1207,6 +1385,30 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus) hideSystemUi()
     }
 
+
+    /** If the DM never syncs / session is missing, stop waiting and return to start. */
+    private fun scheduleJoinTimeout(sid: String, resuming: Boolean) {
+        joinTimeoutRunnable?.let { handler.removeCallbacks(it) }
+        val timeoutMs = 20_000L
+        val r = Runnable {
+            if (!isOnlineClient) return@Runnable
+            val status = try { getPlayerStatus() } catch (_: Exception) { "" }
+            val admitted = status.contains(localPlayerName) && status.contains("| HP:")
+            val hasParty = try {
+                getBattleRoster().substringBefore('|').isNotBlank()
+            } catch (_: Exception) { false }
+            if (admitted || hasParty) return@Runnable
+            Log.w(TAG, "Join timeout for session $sid (resuming=$resuming)")
+            Toast.makeText(
+                this,
+                "Could not reach the DM / session $sid (timed out). Returning to menu.",
+                Toast.LENGTH_LONG
+            ).show()
+            resetToStartMenu()
+        }
+        joinTimeoutRunnable = r
+        handler.postDelayed(r, timeoutMs)
+    }
 
     private fun prefs() = getPreferences(MODE_PRIVATE)
 

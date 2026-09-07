@@ -143,10 +143,10 @@ void Game::prepareClientJoin() {
 
 void Game::dmGrantShortRest() {
     if (gameOver_ || players_.empty()) return;
-    // Reuse short-rest recovery without merchant leave logic
+    // Reuse short-rest recovery without merchant leave logic; force past combat lock.
     bool wasMerchant = isMerchantRoom_;
     isMerchantRoom_ = false;
-    playerRest();
+    playerRest(/*force=*/true);
     isMerchantRoom_ = wasMerchant;
     dmSay("The DM grants a short rest.");
 }
@@ -204,6 +204,7 @@ void Game::rollInitiative() {
     if (isMerchantRoom_) return;
 
     for (auto& p : players_) {
+        if (p->isDead) continue; // fallen heroes stay out of initiative
         p->initiative = (getRandomInt(1, 20)) + Attributes::getModifier(p->attributes.dexterity);
         turnOrder_.push_back(p.get());
     }
@@ -229,7 +230,9 @@ void Game::rebuildTurnOrder() {
     }
 
     turnOrder_.clear();
-    for (auto& p : players_) turnOrder_.push_back(p.get());
+    for (auto& p : players_) {
+        if (!p->isDead) turnOrder_.push_back(p.get());
+    }
     for (auto& e : enemies_) turnOrder_.push_back(e.get());
 
     std::sort(turnOrder_.begin(), turnOrder_.end(), [](Character* a, Character* b) {
@@ -259,11 +262,11 @@ Character* Game::findCharacter(const std::string& name) {
     return nullptr;
 }
 
-void Game::buyItem(const std::string& playerName, int itemIndex) {
-    if (gameOver_) return;
-    if (!isMerchantRoom_ || itemIndex < 0 || static_cast<size_t>(itemIndex) >= shopInventory_.size()) return;
+bool Game::buyItem(const std::string& playerName, int itemIndex) {
+    if (gameOver_) return false;
+    if (!isMerchantRoom_ || itemIndex < 0 || static_cast<size_t>(itemIndex) >= shopInventory_.size()) return false;
     Character* hero = findCharacter(playerName);
-    if (!hero) return;
+    if (!hero || hero->isDead) return false;
 
     auto item = shopInventory_[static_cast<size_t>(itemIndex)];
     int cost = (item->bonus + 1) * 25;
@@ -275,9 +278,10 @@ void Game::buyItem(const std::string& playerName, int itemIndex) {
         else hero->heal(item->bonus);
         lastEvent_ = hero->name + " purchased " + item->name + "!";
         addJournalEntry(hero->name + " bought " + item->name + " for " + std::to_string(cost) + " gold.");
-    } else {
-        lastEvent_ = "Not enough gold!";
+        return true;
     }
+    lastEvent_ = "Not enough gold!";
+    return false;
 }
 
 std::string Game::getShopManifest() const {
@@ -289,44 +293,116 @@ std::string Game::getShopManifest() const {
     return ss.str();
 }
 
+void Game::advanceTurn() {
+    if (turnOrder_.empty()) { currentTurnIndex_ = 0; return; }
+    currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+}
+
+void Game::removeFromTurnOrder(Character* c) {
+    if (!c || turnOrder_.empty()) return;
+    Character* cur = nullptr;
+    if (currentTurnIndex_ >= 0 && static_cast<size_t>(currentTurnIndex_) < turnOrder_.size()) {
+        cur = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    }
+    turnOrder_.erase(std::remove(turnOrder_.begin(), turnOrder_.end(), c), turnOrder_.end());
+    if (turnOrder_.empty()) {
+        currentTurnIndex_ = 0;
+        return;
+    }
+    // Keep the same current actor when possible; otherwise clamp.
+    if (cur && cur != c) {
+        for (size_t i = 0; i < turnOrder_.size(); ++i) {
+            if (turnOrder_[i] == cur) {
+                currentTurnIndex_ = static_cast<int>(i);
+                return;
+            }
+        }
+    }
+    if (currentTurnIndex_ >= static_cast<int>(turnOrder_.size())) {
+        currentTurnIndex_ = 0;
+    }
+}
+
+void Game::checkPartyDefeat() {
+    if (players_.empty()) return;
+    bool anyLiving = false;
+    for (const auto& p : players_) {
+        if (!p->isDead) { anyLiving = true; break; }
+    }
+    if (!anyLiving) {
+        gameOver_ = true;
+        lastEvent_ = "Game Over — the entire party has fallen.";
+        dmSay("Silence falls. No hero remains standing.");
+        addChatMessage("System", "Game Over");
+    }
+}
+
 void Game::processTurn() {
     if (gameOver_ || isMerchantRoom_ || turnOrder_.empty() || !isHost_) return;
 
     Character* current = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
+    if (!current) { advanceTurn(); return; }
+
+    // Dead combatants should not remain in the order.
+    if (current->isDead) {
+        removeFromTurnOrder(current);
+        checkPartyDefeat();
+        return;
+    }
+
     if (current->isDowned) {
         bool isEnemy = false;
         for (auto& e : enemies_) if (e.get() == current) isEnemy = true;
         if (!isEnemy) {
+            // Stable PCs skip death saves until healed or damaged again.
+            if (current->isStable) {
+                addChatMessage("System", current->name + " remains stable (unconscious).");
+                advanceTurn();
+                return;
+            }
             int roll = getRandomInt(1, 20);
             if (roll == 20) {
                 current->heal(1);
                 addChatMessage("System", current->name + " stood back up with a Natural 20!");
-            }
-            else if (roll >= 10) {
+            } else if (roll >= 10) {
                 current->deathSaveSuccesses++;
                 if (current->deathSaveSuccesses >= 3) {
                     current->currentHp = 0;
+                    current->isStable = true;
+                    current->deathSaveSuccesses = 3;
                     addChatMessage("System", current->name + " is now stable.");
+                    dmSay(current->name + " stabilizes — still down, but no longer making death saves.");
+                } else {
+                    addChatMessage("System", current->name + " death save success (" +
+                                  std::to_string(current->deathSaveSuccesses) + "/3).");
                 }
             } else {
                 current->deathSaveFailures += (roll == 1 ? 2 : 1);
                 if (current->deathSaveFailures >= 3) {
+                    current->isDead = true;
+                    current->isDowned = true;
+                    current->isStable = false;
+                    current->deathSaveFailures = 3;
                     addChatMessage("System", current->name + " has died.");
-                    lastEvent_ = "Game Over — " + current->name + " has fallen.";
-                    dmSay("The dungeon claims another. This adventure ends here.");
-                    addChatMessage("System", "Game Over");
-                    gameOver_ = true;
+                    lastEvent_ = current->name + " has fallen permanently.";
+                    dmSay(current->name + " breathes their last. The rest of the party fights on.");
+                    removeFromTurnOrder(current);
+                    checkPartyDefeat();
+                    return;
+                } else {
+                    addChatMessage("System", current->name + " death save failure (" +
+                                  std::to_string(current->deathSaveFailures) + "/3).");
                 }
             }
         }
-        currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        advanceTurn();
         return;
     }
 
     bool isEnemy = std::find_if(enemies_.begin(), enemies_.end(), [&](auto& e){ return e.get() == current; }) != enemies_.end();
     if (isEnemy) {
         enemyTurn();
-        currentTurnIndex_ = (currentTurnIndex_ + 1) % static_cast<int>(turnOrder_.size());
+        advanceTurn();
     } else if (current->name.find("(NPC)") != std::string::npos) {
         playerAttack(0);
     }
@@ -531,13 +607,20 @@ void Game::playerSpecialAction(int targetEnemyIndex) {
     }
 }
 
-void Game::playerRest() {
+void Game::playerRest(bool force) {
     if (gameOver_) { lastEvent_ = "Game Over — start a new adventure."; return; }
     if (!turnOrder_.empty() && currentTurnIndex_ >= 0
         && static_cast<size_t>(currentTurnIndex_) < turnOrder_.size()
         && turnOrder_[static_cast<size_t>(currentTurnIndex_)]
         && turnOrder_[static_cast<size_t>(currentTurnIndex_)]->isDowned) {
         lastEvent_ = "You're dying — make death saves, you can't rest now.";
+        return;
+    }
+    // Block Short Rest while foes are still in the room (mid-combat).
+    // DM grant can pass force=true to allow a story beat.
+    if (!force && !isMerchantRoom_ && !enemies_.empty()) {
+        lastEvent_ = "Can't Short Rest in the middle of a fight!";
+        dmSay("Steel yourselves — rest when the chamber is clear.");
         return;
     }
     if (isMerchantRoom_) {
@@ -551,6 +634,7 @@ void Game::playerRest() {
     }
     // Short Rest (5e-inspired): spend hit dice vibe — recover half missing HP + some features
     for (auto& p : players_) {
+        if (p->isDead) continue; // dead heroes stay down
         int missing = p->maxHp - p->currentHp;
         int recover = std::max(p->hitDie() + Attributes::getModifier(p->attributes.constitution), missing / 2);
         if (recover < 1) recover = 1;
@@ -559,6 +643,7 @@ void Game::playerRest() {
         p->heal(recover);
         p->resources = std::min(p->maxResources, p->resources + std::max(1, p->maxResources / 2));
         p->isDowned = false;
+        p->isStable = false;
         p->deathSaveSuccesses = 0;
         p->deathSaveFailures = 0;
     }
@@ -572,7 +657,7 @@ void Game::playerRest() {
 void Game::playerInteract(const std::string& playerName) {
     if (gameOver_) { lastEvent_ = "Game Over — start a new adventure."; return; }
     Character* hero = findCharacter(playerName);
-    if (!hero) return;
+    if (!hero || hero->isDead || hero->isDowned) return;
 
     if (hero->performSavingThrow(hero->attributes.intelligence, 12)) {
         hero->gold += 25;
@@ -585,6 +670,15 @@ void Game::playerInteract(const std::string& playerName) {
         pushVisualEvent(VisualEventType::PLAYER_DAMAGE, idx);
         lastEvent_ = "Fail! A trap hit " + hero->name + " for 3 damage!";
         dmSay("A pressure plate clicks — poison darts!");
+        if (hero->isDead) {
+            removeFromTurnOrder(hero);
+            checkPartyDefeat();
+            return;
+        }
+    }
+    // Interact spends your turn like Attack/Heal.
+    if (!turnOrder_.empty()) {
+        advanceTurn();
     }
 }
 
@@ -601,20 +695,44 @@ void Game::enemyTurn() {
     for(size_t i=0; i<enemies_.size(); ++i) if(enemies_[i].get() == enemy) enemyIdx = static_cast<int>(i);
 
     std::vector<int> validTargets;
-    for(size_t i=0; i<players_.size(); ++i) if(!players_[i]->isDowned) validTargets.push_back(static_cast<int>(i));
+    // Prefer living upright heroes; if none, hit downed/stable (adds failures) but never the already-dead.
+    for(size_t i=0; i<players_.size(); ++i) {
+        if (!players_[i]->isDead && !players_[i]->isDowned) validTargets.push_back(static_cast<int>(i));
+    }
+    if (validTargets.empty()) {
+        for(size_t i=0; i<players_.size(); ++i) {
+            if (!players_[i]->isDead) validTargets.push_back(static_cast<int>(i));
+        }
+    }
+    if (validTargets.empty()) {
+        checkPartyDefeat();
+        return;
+    }
 
-    int targetIdx = validTargets.empty() ? 0 : validTargets[static_cast<size_t>(getRandomInt(0, static_cast<int>(validTargets.size()) - 1))];
+    int targetIdx = validTargets[static_cast<size_t>(getRandomInt(0, static_cast<int>(validTargets.size()) - 1))];
     Character& hero = *players_[static_cast<size_t>(targetIdx)];
 
     pushVisualEvent(VisualEventType::ENEMY_ATTACK, enemyIdx);
     RollResult result = CombatSystem::performAttackRoll(*enemy);
-    if (result.total >= hero.armorClass) {
+    bool hit = (result.total >= hero.armorClass || result.isCriticalHit) && !result.isCriticalFail;
+    if (hit) {
         int dmg = CombatSystem::calculateDamage(*enemy, result.isCriticalHit);
-        hero.takeDamage(dmg);
+        bool wasDowned = hero.isDowned || hero.isStable;
+        // While dying, a critical hit counts as two death-save failures (5e).
+        hero.takeDamage(dmg, wasDowned && result.isCriticalHit);
         pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
         lastEvent_ = enemy->name + " attacks " + hero.name + " for " + std::to_string(dmg) + " damage!";
         addChatMessage("Combat", lastEvent_);
-        if (hero.isDowned) dmSay(hero.name + " drops! Death saving throws will follow on their turns.");
+        if (hero.isDead) {
+            dmSay(hero.name + " is slain!");
+            removeFromTurnOrder(&hero);
+            checkPartyDefeat();
+        } else if (!wasDowned && hero.isDowned) {
+            dmSay(hero.name + " drops! Death saving throws will follow on their turns.");
+        } else if (wasDowned && hero.isDowned) {
+            dmSay(hero.name + " takes a death-save failure from the blow" +
+                 (result.isCriticalHit ? " (critical — two failures)!" : "."));
+        }
     } else {
         lastEvent_ = enemy->name + " misses " + hero.name + "!";
         addChatMessage("Combat", lastEvent_);
@@ -656,7 +774,11 @@ std::string Game::getPartyStatus() const {
     if (gameOver_) ss << "Game Over\n";
     if (dmOnlyTable_ && !dmName_.empty()) ss << "DM: " << dmName_ << "\n";
     for (const auto& p : players_) {
-        ss << p->name << " | HP: " << p->currentHp << "/" << p->maxHp << (p->isDowned ? " [DOWN]" : "") << "\n";
+        ss << p->name << " | HP: " << p->currentHp << "/" << p->maxHp;
+        if (p->isDead) ss << " [DEAD]";
+        else if (p->isStable) ss << " [STABLE]";
+        else if (p->isDowned) ss << " [DOWN]";
+        ss << "\n";
     }
     if (!enemies_.empty()) {
         ss << "--- Foes ---\n";
@@ -705,6 +827,8 @@ std::string Game::serialize() {
         if (p->equippedWeapon) ss << p->equippedWeapon->name << ":" << p->equippedWeapon->bonus << ":W"; else ss << "None:0:W";
         ss << ",";
         if (p->equippedArmor) ss << p->equippedArmor->name << ":" << p->equippedArmor->bonus << ":A"; else ss << "None:0:A";
+        ss << "," << (p->isDowned ? 1 : 0) << "," << p->deathSaveSuccesses << "," << p->deathSaveFailures
+           << "," << (p->isStable ? 1 : 0) << "," << (p->isDead ? 1 : 0);
         ss << ";";
     }
     ss << "|";
@@ -798,7 +922,6 @@ void Game::deserialize(const std::string& data) {
             p->attributes = {std::stoi(str_s), std::stoi(dex_s), std::stoi(con_s), std::stoi(int_s), std::stoi(wis_s), std::stoi(cha_s)};
             p->gold = std::stoi(gold_s);
             p->initiative = std::stoi(ini_s);
-            p->isDowned = (p->currentHp <= 0);
 
             std::string item_w, item_a;
             if (std::getline(ss_p, item_w, ',')) {
@@ -818,6 +941,22 @@ void Game::deserialize(const std::string& data) {
                     int bonus = std::stoi(item_a.substr(p1 + 1, p2 - p1 - 1));
                     if (name != "None") p->equippedArmor = std::make_shared<Item>(Item{name, ItemType::ARMOR, bonus});
                 }
+            }
+            // Optional trailing death-save fields (backward compatible with older saves).
+            std::string down_s, dss_s, dsf_s, stab_s, dead_s;
+            if (std::getline(ss_p, down_s, ',')) {
+                p->isDowned = (down_s == "1") || (p->currentHp <= 0);
+                if (std::getline(ss_p, dss_s, ',')) p->deathSaveSuccesses = std::stoi(dss_s);
+                if (std::getline(ss_p, dsf_s, ',')) p->deathSaveFailures = std::stoi(dsf_s);
+                if (std::getline(ss_p, stab_s, ',')) p->isStable = (stab_s == "1");
+                if (std::getline(ss_p, dead_s, ',')) p->isDead = (dead_s == "1");
+            } else {
+                p->isDowned = (p->currentHp <= 0);
+            }
+            if (p->isDead) {
+                p->isDowned = true;
+                p->isStable = false;
+                p->currentHp = 0;
             }
             p->calculateAC();
             players_.push_back(std::move(p));
