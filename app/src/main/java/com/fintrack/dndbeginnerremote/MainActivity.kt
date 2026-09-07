@@ -810,6 +810,7 @@ class MainActivity : AppCompatActivity() {
             }
             "buy" -> doBuyItem(player, target)
             "levelup", "increaseStat" -> doIncreaseStat(player, statIndex)
+            "levelupBatch" -> applyLevelUpBatch(player, action["allocations"]?.toString().orEmpty())
             else -> Log.w(TAG, "Unknown action type: $type")
         }
     }
@@ -1573,7 +1574,7 @@ class MainActivity : AppCompatActivity() {
         if (canLevel) {
             val pts = Regex("""POINTS TO SPEND:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: ""
             pointsHint.visibility = View.VISIBLE
-            pointsHint.text = "You have $pts attribute point(s) to spend."
+            pointsHint.text = "Attribute points ready: $pts — assign any or all below."
             levelUpBtn.visibility = View.VISIBLE
         } else {
             pointsHint.visibility = View.GONE
@@ -1661,15 +1662,154 @@ class MainActivity : AppCompatActivity() {
         return currentActorName().equals(c, ignoreCase = true)
     }
 
-    private fun showStatUpgradeDialog(forName: String = localPlayerName) {
-        val stats = arrayOf("Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma")
-        AlertDialog.Builder(this).setTitle("Spend Point — $forName").setItems(stats) { _, which ->
-            performOrQueue("levelup", which) {
-                doIncreaseStat(forName, which)
+    private fun parsePendingStatPoints(sheet: String): Int =
+        Regex("""POINTS TO SPEND:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+
+    private fun parseStatScore(sheet: String, key: String): Int =
+        Regex("""$key:\s*(\d+)\s*\([^)]+\)""").find(sheet)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 10
+
+    /** Host-authoritative multi-point spend: allocations = "s0,s1,s2,s3,s4,s5" counts per stat. */
+    private fun applyLevelUpBatch(playerName: String, allocations: String) {
+        val parts = allocations.split(',').map { it.trim().toIntOrNull() ?: 0 }
+        if (parts.isEmpty() || parts.all { it <= 0 }) return
+        for (i in 0 until minOf(6, parts.size)) {
+            repeat(parts[i].coerceAtLeast(0)) {
+                doIncreaseStat(playerName, i)
             }
-            // Clients already toast "Sent to the DM…"; host/solo get sync via performOrQueue.
-            if (!isOnlineClient) updateUi()
-        }.show()
+        }
+    }
+
+    private fun commitStatAllocations(forName: String, deltas: IntArray) {
+        val total = deltas.sum()
+        if (total <= 0) return
+        val allocStr = deltas.joinToString(",")
+        if (isOnlineClient) {
+            val mp = multiplayer
+            if (mp == null || !mp.isAvailable) {
+                Toast.makeText(this, "Not connected to the DM session.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            mp.pushAction(
+                mapOf(
+                    "type" to "levelupBatch",
+                    "allocations" to allocStr,
+                    "targetIndex" to 0,
+                    "statIndex" to 0,
+                    "playerName" to forName,
+                    "classId" to localClassId
+                )
+            )
+            Toast.makeText(this, "Sent $total point(s) to the DM…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        applyLevelUpBatch(forName, allocStr)
+        syncAndSave()
+        updateUi()
+        Toast.makeText(
+            this,
+            if (total == 1) "Spent 1 attribute point." else "Spent $total attribute points.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun showStatUpgradeDialog(forName: String = localPlayerName) {
+        if (!nativeReady) return
+        val sheet = try { getDetailedSheet(forName) } catch (_: Exception) { "" }
+        val pending = parsePendingStatPoints(sheet)
+        if (pending <= 0) {
+            Toast.makeText(this, "No attribute points to spend.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = arrayOf(
+            "Strength" to "STR",
+            "Dexterity" to "DEX",
+            "Constitution" to "CON",
+            "Intelligence" to "INT",
+            "Wisdom" to "WIS",
+            "Charisma" to "CHA"
+        )
+        val baseScores = IntArray(6) { i -> parseStatScore(sheet, labels[i].second) }
+        val allocated = IntArray(6)
+        var remaining = pending
+
+        val view = layoutInflater.inflate(R.layout.dialog_levelup_assign, null)
+        val remainingTv = view.findViewById<TextView>(R.id.levelUpRemaining)
+        val list = view.findViewById<LinearLayout>(R.id.levelUpStatList)
+        val confirmBtn = view.findViewById<Button>(R.id.levelUpConfirm)
+        val rowUis = mutableListOf<Triple<Button, TextView, Button>>()
+
+        fun refreshUi() {
+            remainingTv.text = "Points remaining: $remaining  ·  Assigned: ${allocated.sum()} / $pending"
+            confirmBtn.isEnabled = allocated.sum() > 0
+            confirmBtn.alpha = if (confirmBtn.isEnabled) 1f else 0.45f
+            val n = allocated.sum()
+            confirmBtn.text = when {
+                n == 0 -> "Confirm"
+                remaining == 0 -> "Confirm — spend all $n"
+                else -> "Confirm — spend $n (keep $remaining)"
+            }
+            for (i in 0 until 6) {
+                val (minus, addTv, plus) = rowUis[i]
+                val preview = baseScores[i] + allocated[i]
+                addTv.text = if (allocated[i] > 0) "+${allocated[i]}" else "0"
+                addTv.setTextColor(
+                    if (allocated[i] > 0) getColor(R.color.gold) else getColor(R.color.parchment)
+                )
+                // Update current line on the row
+                val row = list.getChildAt(i)
+                row?.findViewById<TextView>(R.id.statAssignCurrent)?.text =
+                    "Now ${baseScores[i]} → $preview"
+                minus.isEnabled = allocated[i] > 0
+                plus.isEnabled = remaining > 0
+                minus.alpha = if (minus.isEnabled) 1f else 0.4f
+                plus.alpha = if (plus.isEnabled) 1f else 0.4f
+            }
+        }
+
+        labels.forEachIndexed { index, (full, short) ->
+            val row = layoutInflater.inflate(R.layout.item_stat_assign_row, list, false)
+            row.findViewById<TextView>(R.id.statAssignName).text = "$short · $full"
+            row.findViewById<TextView>(R.id.statAssignCurrent).text =
+                "Now ${baseScores[index]} → ${baseScores[index]}"
+            val minus = row.findViewById<Button>(R.id.statAssignMinus)
+            val addTv = row.findViewById<TextView>(R.id.statAssignAdd)
+            val plus = row.findViewById<Button>(R.id.statAssignPlus)
+            minus.setOnClickListener {
+                if (allocated[index] <= 0) return@setOnClickListener
+                allocated[index]--
+                remaining++
+                refreshUi()
+            }
+            plus.setOnClickListener {
+                if (remaining <= 0) return@setOnClickListener
+                allocated[index]++
+                remaining--
+                refreshUi()
+            }
+            rowUis.add(Triple(minus, addTv, plus))
+            list.addView(row)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Level up — $forName")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .create()
+        confirmBtn.setOnClickListener {
+            if (allocated.sum() <= 0) return@setOnClickListener
+            dialog.dismiss()
+            commitStatAllocations(forName, allocated.copyOf())
+            // If points remain (partial spend), reopen assign panel with fresh sheet.
+            val left = try {
+                parsePendingStatPoints(getDetailedSheet(forName))
+            } catch (_: Exception) { 0 }
+            // Online clients won't see spend until host syncs — skip auto-reopen.
+            if (!isOnlineClient && left > 0) {
+                showStatUpgradeDialog(forName)
+            }
+        }
+        refreshUi()
+        dialog.show()
     }
 
     private fun parsePlayerGold(): Int {
