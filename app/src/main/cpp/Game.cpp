@@ -45,6 +45,15 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
     addAlly("Melf (NPC)", CharacterClass::WIZARD);
 
+    // Beginner Solo padding: +2 max HP and +1 potion/feature charge (quest only; online/DM paths unchanged).
+    for (auto& p : players_) {
+        if (!p) continue;
+        p->maxHp += 2;
+        p->currentHp = p->maxHp;
+        p->maxResources += 1;
+        p->resources = p->maxResources;
+    }
+
     applySoloQuestRoom();
     rollInitiative();
 
@@ -52,6 +61,7 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     addChatMessage("System", "A new party begins the Ashen Lantern quest.");
     dmSay("Welcome, adventurers. I am your Dungeon Master.");
     dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, Search once per clear chamber, and Short Rest when safe.");
+    dmSay("You carry an extra supply for this quest — drink a Potion when bloodied; Melf will help when you are low.");
 }
 
 void Game::startDmSession(const std::string& dmName) {
@@ -218,35 +228,60 @@ void Game::spawnSoloQuestEnemies() {
     enemies_.clear();
     const auto beat = static_cast<SoloQuestBeat>(questBeat_);
 
-    auto makeFoe = [&](const std::string& name, CharacterClass cl, int bonusHp, int bonusAc) {
+    // Solo Ashen Lantern: tune early rooms for beginners. attackStatDelta lowers to-hit/damage
+    // (and Rogue AC via Dex). resourceCap strips Action Surge / Sneak so early foes don't one-shot.
+    // Post-quest procedural spawns are unchanged.
+    auto makeFoe = [&](const std::string& name, CharacterClass cl, int bonusHp, int bonusAc,
+                       int resourceCap = -1, int attackStatDelta = 0) {
         auto foe = std::make_unique<Character>(name, cl, name + "-" + std::to_string(getRandomInt(0, 1000000)));
+        if (attackStatDelta != 0) {
+            switch (cl) {
+                case CharacterClass::ROGUE:
+                    foe->attributes.dexterity = std::max(3, foe->attributes.dexterity + attackStatDelta);
+                    break;
+                case CharacterClass::FIGHTER:
+                    foe->attributes.strength = std::max(3, foe->attributes.strength + attackStatDelta);
+                    break;
+                case CharacterClass::WIZARD:
+                    foe->attributes.intelligence = std::max(3, foe->attributes.intelligence + attackStatDelta);
+                    break;
+                case CharacterClass::CLERIC:
+                    foe->attributes.wisdom = std::max(3, foe->attributes.wisdom + attackStatDelta);
+                    break;
+            }
+            foe->calculateAC();
+        }
         foe->maxHp = std::max(4, foe->maxHp + bonusHp);
         foe->currentHp = foe->maxHp;
         foe->armorClass += bonusAc;
+        if (resourceCap >= 0) {
+            foe->maxResources = resourceCap;
+            foe->resources = resourceCap;
+        }
         enemies_.push_back(std::move(foe));
     };
 
     switch (beat) {
         case SoloQuestBeat::MILLHOLLOW:
-            // Soft open with optional light scout — one goblin if the road feels watched.
-            makeFoe("Goblin Scout", CharacterClass::ROGUE, -2, 0);
+            // Soft open: one weak scout (was HP-2 full Rogue with Sneak).
+            makeFoe("Goblin Scout", CharacterClass::ROGUE, -4, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
             break;
         case SoloQuestBeat::THORNPATH:
-            makeFoe("Wolf", CharacterClass::ROGUE, 2, 0);
-            if (getRandomInt(0, 1) == 1) {
-                makeFoe("Goblin", CharacterClass::ROGUE, 0, 0);
-            }
+            // Always a single wolf — no random second goblin.
+            makeFoe("Wolf", CharacterClass::ROGUE, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
             break;
         case SoloQuestBeat::CRYPT_DOORS:
             // Puzzle-lite soft open: Search once for the rune-key (no mandatory fight).
             break;
         case SoloQuestBeat::BONE_GALLERY:
-            makeFoe("Skeleton", CharacterClass::FIGHTER, 4, 1);
-            makeFoe("Skeleton", CharacterClass::FIGHTER, 2, 0);
+            // Two softer skeletons (no Action Surge; lower STR) instead of tanky pair.
+            makeFoe("Skeleton", CharacterClass::FIGHTER, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            makeFoe("Skeleton", CharacterClass::FIGHTER, -2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
             break;
         case SoloQuestBeat::LANTERN_VAULT:
-            // Ogre-lite / skeleton champion using existing FIGHTER class.
-            makeFoe("Skeleton Champion", CharacterClass::FIGHTER, 18, 2);
+            // Climax retained: one Champion, HP/AC one notch down, single surge max.
+            makeFoe("Skeleton Champion", CharacterClass::FIGHTER, 12, 1, /*resourceCap=*/1, /*attackStatDelta=*/-2);
+            dmSay("The vault guardian stirs — a Skeleton Champion. It can surge once; keep a Potion ready and let Melf help.");
             break;
         case SoloQuestBeat::RESOLUTION:
             // Shrine: no fight — resolution beat.
@@ -521,8 +556,8 @@ void Game::checkPartyDefeat() {
     }
     if (!anyLiving) {
         gameOver_ = true;
-        lastEvent_ = "Game Over — the entire party has fallen.";
-        dmSay("Silence falls. No hero remains standing.");
+        lastEvent_ = "Game Over — the entire party has fallen. Tap Menu, then Solo adventure to try again.";
+        dmSay("Silence falls. No hero remains standing. Tap Menu → Solo adventure for a new run (this save is cleared).");
         addChatMessage("System", "Game Over");
     }
 }
@@ -1185,16 +1220,23 @@ int Game::pickAllyAiEnemyTarget() const {
 int Game::pickAllyAiHealTarget() const {
     int best = -1;
     int bestScore = -100000;
+    // During Ashen Lantern (beats 1–5), bias heals earlier so beginners aren't left bloodied.
+    const bool earlySoloHeal = isSoloQuestScripted()
+        && questBeat_ <= static_cast<int>(SoloQuestBeat::LANTERN_VAULT);
     for (size_t i = 0; i < players_.size(); ++i) {
         const Character* p = players_[i].get();
         if (!p || p->isDead) continue;
         int score = 0;
         if (p->isDowned) {
             score = 200 + p->deathSaveFailures * 30; // revive / stabilize urgency
+        } else if (earlySoloHeal && p->maxHp > 0 && p->currentHp * 2 <= p->maxHp) {
+            score = 95 + (p->maxHp - p->currentHp); // bloodied — heal sooner on solo quest
         } else if (p->maxHp > 0 && p->currentHp * 3 <= p->maxHp) {
             score = 80 + (p->maxHp - p->currentHp); // critically low
         } else if (p->currentHp <= 4 && p->currentHp < p->maxHp) {
             score = 60;
+        } else if (earlySoloHeal && p->currentHp <= 6 && p->currentHp < p->maxHp) {
+            score = 55; // soft early-quest cushion
         } else {
             continue; // healthy enough — do not burn a heal
         }
