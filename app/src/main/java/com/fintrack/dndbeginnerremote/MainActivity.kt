@@ -304,22 +304,35 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
-    private fun requireFirebaseOrToast(): Boolean {
-        val probe = MultiplayerManager("PROBE")
-        val ok = probe.isAvailable
-        probe.detach()
-        if (!ok) {
-            AlertDialog.Builder(this)
-                .setTitle("Firebase not configured")
-                .setMessage(
-                    "Online play needs Firebase Realtime Database.\n\n" +
-                        "Add app/google-services.json, uncomment the Google Services plugin in app/build.gradle.kts, " +
-                        "and follow FIREBASE_SETUP.md — then rebuild."
-                )
-                .setPositiveButton("OK", null)
-                .show()
+    private fun firebaseReady(): Boolean {
+        return try {
+            if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
+                FirebaseApp.initializeApp(this)
+            }
+            val probe = MultiplayerManager("PROBE")
+            val ok = probe.isAvailable
+            probe.detach()
+            ok
+        } catch (e: Exception) {
+            Log.w(TAG, "firebaseReady failed", e)
+            false
         }
-        return ok
+    }
+
+    private fun showFirebaseRequiredDialog(then: (() -> Unit)? = null) {
+        AlertDialog.Builder(this)
+            .setTitle("Firebase needed for online play")
+            .setMessage(
+                "Host / Join need Firebase Realtime Database.\n\n" +
+                    "1. Add app/google-services.json from the Firebase console\n" +
+                    "2. Uncomment the Google Services plugin in app/build.gradle.kts\n" +
+                    "3. Enable Realtime Database (see FIREBASE_SETUP.md)\n" +
+                    "4. Clean + Rebuild\n\n" +
+                    "Solo adventure works without Firebase."
+            )
+            .setPositiveButton("OK") { _, _ -> then?.invoke() }
+            .setCancelable(false)
+            .show()
     }
 
     private fun setupMultiplayer(id: String, asHost: Boolean) {
@@ -510,20 +523,10 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Welcome back, $localPlayerName (solo)", Toast.LENGTH_SHORT).show()
     }
 
+
     private fun showStartDialog() {
         Log.d(TAG, "Showing start dialog")
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(60, 40, 60, 10)
-        }
         val saved = savedState()
-        val defaultName = saved?.let { heroNameFromSave(it) } ?: prefs().getString("hero_name", null)
-        val nameInput = EditText(this).apply {
-            hint = "Your name"
-            if (!defaultName.isNullOrBlank()) setText(defaultName)
-        }
-        layout.addView(nameInput)
-
         val modes = mutableListOf<String>()
         if (saved != null) modes += "Continue solo save (${heroNameFromSave(saved)})"
         modes += "Solo adventure"
@@ -532,30 +535,56 @@ class MainActivity : AppCompatActivity() {
 
         AlertDialog.Builder(this)
             .setTitle("D&D Beginner")
-            .setView(layout)
             .setCancelable(false)
             .setItems(modes.toTypedArray()) { _, which ->
                 val label = modes[which]
-                localPlayerName = nameInput.text.toString().ifEmpty { "Hero" }
                 when {
                     label.startsWith("Continue") -> continueSavedGame()
-                    label.startsWith("Solo") -> showClassSelection(mode = "solo")
+                    label.startsWith("Solo") -> askHeroName { name ->
+                        localPlayerName = name
+                        showClassSelection(mode = "solo")
+                    }
                     label.startsWith("Host") -> {
-                        if (!requireFirebaseOrToast()) {
-                            showStartDialog()
+                        if (!firebaseReady()) {
+                            // Don't reopen the menu underneath — wait for OK
+                            showFirebaseRequiredDialog { showStartDialog() }
                             return@setItems
                         }
-                        showClassSelection(mode = "host")
+                        askHeroName(hint = "DM / host name") { name ->
+                            localPlayerName = name
+                            showClassSelection(mode = "host")
+                        }
                     }
                     label.startsWith("Join") -> {
-                        if (!requireFirebaseOrToast()) {
-                            showStartDialog()
+                        if (!firebaseReady()) {
+                            showFirebaseRequiredDialog { showStartDialog() }
                             return@setItems
                         }
-                        showJoinDialog()
+                        askHeroName { name ->
+                            localPlayerName = name
+                            showJoinDialog()
+                        }
                     }
                 }
             }
+            .show()
+    }
+
+    private fun askHeroName(hint: String = "Your hero name", onName: (String) -> Unit) {
+        val input = EditText(this).apply {
+            this.hint = hint
+            val prior = prefs().getString("hero_name", null)
+            if (!prior.isNullOrBlank()) setText(prior)
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(hint)
+            .setView(input)
+            .setCancelable(false)
+            .setPositiveButton("Next") { _, _ ->
+                onName(input.text.toString().ifBlank { "Hero" })
+            }
+            .setNegativeButton("Back") { _, _ -> showStartDialog() }
             .show()
     }
 
@@ -590,6 +619,20 @@ class MainActivity : AppCompatActivity() {
                     btnReset.visibility = View.GONE
                     val sidNow = try { getSessionId() } catch (_: Exception) { "" }
                     setupMultiplayer(sidNow, asHost = true)
+                    if (!isOnlineHost || multiplayer?.isAvailable != true) {
+                        Toast.makeText(
+                            this,
+                            "Could not start online session — check FIREBASE_SETUP.md",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        isOnlineHost = false
+                        multiplayer = null
+                        showFirebaseRequiredDialog {
+                            sessionActive = false
+                            showStartDialog()
+                        }
+                        return@setItems
+                    }
                     syncAndSave()
                     updateUi()
                     maybeOfferTutorialThenCoach()
