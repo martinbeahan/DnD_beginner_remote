@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "sessions": {
+      "$sid": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
