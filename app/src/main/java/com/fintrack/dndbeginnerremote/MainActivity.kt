@@ -77,10 +77,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettingsAbandon: Button
     private lateinit var btnSettingsClose: Button
     private lateinit var settingsAboutText: TextView
-    // Audio stubs — prefs only until a later audio PR wires playback/TTS.
+    // Audio prefs + GameAudio (BGM / SFX / optional on-device TTS).
     private var musicEnabled = true
     private var sfxEnabled = true
     private var dmVoiceEnabled = false
+    private var gameAudio: GameAudio? = null
+    private var lastCombatMusicState: Boolean? = null
     private val handler = Handler(Looper.getMainLooper())
     private var uiLoopStarted = false
     private val uiTick = object : Runnable {
@@ -287,6 +289,9 @@ class MainActivity : AppCompatActivity() {
         musicEnabled = prefs().getBoolean("pref_music_enabled", true)
         sfxEnabled = prefs().getBoolean("pref_sfx_enabled", true)
         dmVoiceEnabled = prefs().getBoolean("pref_dm_voice_enabled", false)
+        gameAudio = GameAudio(this).also {
+            it.start(musicEnabled, sfxEnabled, dmVoiceEnabled)
+        }
 
         // Only wipe when a prior *active* session exited uncleanly (crash_guard left true).
         // Do NOT arm crash_guard merely because the start dialog is shown.
@@ -309,11 +314,14 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         handler.removeCallbacks(uiTick)
         uiLoopStarted = false
+        gameAudio?.release()
+        gameAudio = null
         super.onDestroy()
     }
 
     override fun onPause() {
         super.onPause()
+        gameAudio?.onPause()
         // Flush save before process death so progress survives relaunch.
         // Skip until a session is active so the start dialog can't overwrite a good save with an empty game.
         if (!nativeReady || !sessionActive) return
@@ -335,6 +343,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        gameAudio?.onResume()
+    }
 
     /** Detach Firebase listeners and clear online flags before mode switches / start menu. */
     private fun detachOnlineSession() {
@@ -956,7 +968,10 @@ class MainActivity : AppCompatActivity() {
                 showJoinDialog()
             }
         }
-        btnMenuSettings.setOnClickListener { showSettingsOverlay() }
+        btnMenuSettings.setOnClickListener {
+            gameAudio?.playUiClick()
+            showSettingsOverlay()
+        }
         btnMenuQuit.setOnClickListener { moveTaskToBack(true) }
 
         chkBeginnerTips.setOnCheckedChangeListener { _, checked ->
@@ -966,14 +981,18 @@ class MainActivity : AppCompatActivity() {
         chkMusic.setOnCheckedChangeListener { _, checked ->
             musicEnabled = checked
             prefs().edit().putBoolean("pref_music_enabled", checked).apply()
+            gameAudio?.setMusicEnabled(checked)
         }
         chkSfx.setOnCheckedChangeListener { _, checked ->
             sfxEnabled = checked
             prefs().edit().putBoolean("pref_sfx_enabled", checked).apply()
+            gameAudio?.setSfxEnabled(checked)
+            if (checked) gameAudio?.playUiClick()
         }
         chkDmVoice.setOnCheckedChangeListener { _, checked ->
             dmVoiceEnabled = checked
             prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
+            gameAudio?.setDmVoiceEnabled(checked)
         }
         btnSettingsTutorial.setOnClickListener {
             hideSettingsOverlay()
@@ -1000,30 +1019,35 @@ class MainActivity : AppCompatActivity() {
         chkMusic.setOnCheckedChangeListener { _, checked ->
             musicEnabled = checked
             prefs().edit().putBoolean("pref_music_enabled", checked).apply()
+            gameAudio?.setMusicEnabled(checked)
         }
         chkSfx.setOnCheckedChangeListener { _, checked ->
             sfxEnabled = checked
             prefs().edit().putBoolean("pref_sfx_enabled", checked).apply()
+            gameAudio?.setSfxEnabled(checked)
+            if (checked) gameAudio?.playUiClick()
         }
         chkDmVoice.setOnCheckedChangeListener { _, checked ->
             dmVoiceEnabled = checked
             prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
+            gameAudio?.setDmVoiceEnabled(checked)
         }
         btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
         val verCode = try {
             packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
         } catch (_: Exception) {
-            18
+            19
         }
         val verName = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.3"
         } catch (_: Exception) {
-            "1.2"
+            "1.3"
         }
         settingsAboutText.text =
             getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
-                "\n\nAudio attribution will list assets when music/SFX ship; " +
-                "DM voice uses on-device Text-to-Speech when enabled."
+                "\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
+                "StarNinjas sword/clash SFX; Darsycho monster snarl; bart interface beep. " +
+                "See ATTRIBUTION.md. DM voice uses on-device Text-to-Speech (no third-party voices)."
         settingsRoot.visibility = View.VISIBLE
         settingsRoot.bringToFront()
     }
@@ -1545,6 +1569,13 @@ class MainActivity : AppCompatActivity() {
         val chat = getChatHistory()
         if (chat != lastChatHistory) {
             lastChatHistory = chat
+            gameAudio?.maybeSpeakDmFromChat(chat)
+        }
+
+        val inCombatNow = try { isInCombat() } catch (_: Exception) { false }
+        if (lastCombatMusicState != inCombatNow) {
+            lastCombatMusicState = inCombatNow
+            gameAudio?.syncCombatMusic(inCombatNow)
         }
 
         val roomKey = try { getRoomDescription().take(40) } catch (_: Exception) { "" } + "|" +
@@ -1858,9 +1889,19 @@ class MainActivity : AppCompatActivity() {
                 val playerSide = e.contains(localPlayerName.lowercase()) || e.contains("you ")
                 val enemyAttack = (e.contains("goblin") || e.contains("skeleton")) && !playerSide
                 animateAttack(attackerIsPlayer = !enemyAttack)
+                if (enemyAttack) {
+                    gameAudio?.playGrowl()
+                    gameAudio?.playAttack()
+                } else {
+                    gameAudio?.playAttack()
+                }
+                if (e.contains("hit") || e.contains("damage") || e.contains("critical")) {
+                    gameAudio?.playHit()
+                }
             }
             e.contains("damage") || e.contains("struck") || e.contains("wounded") -> {
                 animateAttack(attackerIsPlayer = true)
+                gameAudio?.playHit()
             }
         }
     }
