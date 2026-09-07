@@ -30,6 +30,7 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     turnCounter_ = 0;
     roomCount_ = 1;
     dmOnlyTable_ = false;
+    roomSearchUsed_ = false;
     dmName_.clear();
     // Local / solo table is always the turn authority (clients opt out via prepareClientJoin).
     isHost_ = true;
@@ -61,6 +62,7 @@ void Game::startDmSession(const std::string& dmName) {
     turnCounter_ = 0;
     roomCount_ = 0;
     isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
     dmOnlyTable_ = true;
     dmName_ = dmName.empty() ? "Dungeon Master" : dmName;
     isHost_ = true;
@@ -80,6 +82,7 @@ void Game::dmBeginDungeon() {
     }
     roomCount_ = 1;
     isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
     gameOver_ = false;
     generateRoomDescription();
     spawnRoomContent();
@@ -99,6 +102,7 @@ void Game::dmAdvanceRoom() {
         return;
     }
     roomCount_++;
+    roomSearchUsed_ = false;
     spawnRoomContent();
     if (!isMerchantRoom_) {
         generateRoomDescription();
@@ -133,6 +137,7 @@ void Game::prepareClientJoin() {
     turnCounter_ = 0;
     roomCount_ = 0;
     isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
     dmOnlyTable_ = false;
     dmName_.clear();
     isHost_ = false;
@@ -176,6 +181,7 @@ void Game::spawnRoomContent() {
     enemies_.clear();
     shopInventory_.clear();
     isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
 
     if (roomCount_ > 1 && roomCount_ % 4 == 0) {
         isMerchantRoom_ = true;
@@ -341,18 +347,64 @@ void Game::checkPartyDefeat() {
 
 bool Game::isAllyAi(const Character* c) const {
     if (!c) return false;
-    if (c->name.find("(NPC)") != std::string::npos) return true;
-    // Solo starter ally uses uid "ally-N"; never treat the local hero as AI.
-    if (c->uid.rfind("ally-", 0) == 0) return true;
-    return false;
+    // Only explicit NPC companions are AI. Joined humans (even with ally- uids) wait for input.
+    return c->name.find("(NPC)") != std::string::npos;
+}
+
+void Game::grantKillLoot(Character* actor, const std::string& foeName) {
+    int gold = 8 + (roomCount_ * 3) + getRandomInt(0, 7);
+    Character* looter = actor;
+    if (!looter || looter->isDead) {
+        looter = nullptr;
+        for (auto& p : players_) {
+            if (p && !p->isDead) { looter = p.get(); break; }
+        }
+    }
+    if (!looter) return;
+    looter->gold += gold;
+    std::string msg = looter->name + " loots " + std::to_string(gold) + " gold from the " + foeName + ".";
+    addChatMessage("Combat", msg);
+    dmSay(msg);
+    addJournalEntry(msg);
+    lastEvent_ = msg;
+}
+
+void Game::enterClearedRoom(Character* actor) {
+    int xpGained = 50 + (roomCount_ * 15);
+    for (auto& p : players_) {
+        if (p->addXp(xpGained)) {
+            dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
+        }
+    }
+    dmSay("The party gains " + std::to_string(xpGained) + " XP.");
+    if (actor && !actor->isDead) {
+        auto loot = LootSystem::generateLoot(roomCount_);
+        if (loot) {
+            if (loot->type == ItemType::WEAPON) actor->equippedWeapon = loot;
+            else if (loot->type == ItemType::ARMOR) { actor->equippedArmor = loot; actor->calculateAC(); }
+            dmSay(actor->name + " finds " + loot->getDescription() + " among the spoils.");
+            addJournalEntry(actor->name + " found loot: " + loot->getDescription());
+        }
+    }
+    // Stay in this chamber so Short Rest / one Search / Onward are available.
+    turnOrder_.clear();
+    currentTurnIndex_ = 0;
+    roomSearchUsed_ = false;
+    roomDescription_ += " The foes lie still. You may Search, take a Short Rest, or press Onward.";
+    lastEvent_ = "Room cleared! Search, Rest, or Onward.";
+    addChatMessage("Combat", lastEvent_);
+    dmSay("The chamber is clear. Search for loot, take a Short Rest, or press Onward.");
 }
 
 void Game::purgeDownedEnemies() {
     // Drop 0-HP foes out of the encounter without touching a dangling turnOrder_ pointer.
     bool removed = false;
+    Character* looter = getCurrentActor();
     for (auto it = enemies_.begin(); it != enemies_.end(); ) {
         if ((*it)->currentHp <= 0 || (*it)->isDowned) {
-            addJournalEntry("Defeated " + (*it)->name);
+            std::string foeName = (*it)->name;
+            grantKillLoot(looter, foeName);
+            addJournalEntry("Defeated " + foeName);
             removeFromTurnOrder(it->get());
             it = enemies_.erase(it);
             removed = true;
@@ -362,17 +414,7 @@ void Game::purgeDownedEnemies() {
     }
     if (!removed) return;
     if (enemies_.empty()) {
-        int xpGained = 50 + (roomCount_ * 15);
-        for (auto& p : players_) {
-            if (p->addXp(xpGained)) {
-                dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
-            }
-        }
-        dmSay("The party gains " + std::to_string(xpGained) + " XP.");
-        roomCount_++;
-        spawnRoomContent();
-        generateRoomDescription();
-        rollInitiative();
+        enterClearedRoom(looter);
     } else if (!turnOrder_.empty()) {
         if (currentTurnIndex_ >= static_cast<int>(turnOrder_.size())) {
             currentTurnIndex_ = 0;
@@ -441,12 +483,16 @@ void Game::allyTurn() {
 }
 
 void Game::processTurn() {
-    if (gameOver_ || isMerchantRoom_ || turnOrder_.empty() || !isHost_) return;
+    if (gameOver_ || isMerchantRoom_ || !isHost_) return;
+    // Cleared chamber: wait for Search / Short Rest / Onward — do not AI-spin allies.
+    if (enemies_.empty()) return;
+    if (turnOrder_.empty()) return;
 
     Character* current = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
     if (!current) { advanceTurn(); return; }
 
-    // Dead combatants should not remain in the order.
+    // Dead / zero-HP heroes must never take a normal action turn.
+    if (!current->isDead && current->currentHp <= 0) current->isDowned = true;
     if (current->isDead) {
         removeFromTurnOrder(current);
         checkPartyDefeat();
@@ -573,38 +619,21 @@ bool Game::performWeaponAttack(Character* actor, Character& target, int atkVisIn
 }
 
 void Game::resolveEnemyDefeated(Character* actor, int /*targetEnemyIndex*/) {
-    // Remove dead enemies and advance dungeon.
+    // Remove dead enemies; pause in a cleared chamber (do not auto-spawn next room).
     // Strip turnOrder_ entries BEFORE destroying the Character (no dangling pointers).
     for (auto it = enemies_.begin(); it != enemies_.end(); ) {
         if ((*it)->currentHp <= 0) {
-            addJournalEntry("Defeated " + (*it)->name);
-            dmSay("The " + (*it)->name + " falls. The dungeon grows quieter… for now.");
+            std::string foeName = (*it)->name;
+            grantKillLoot(actor, foeName);
+            addJournalEntry("Defeated " + foeName);
+            dmSay("The " + foeName + " falls. The dungeon grows quieter… for now.");
             removeFromTurnOrder(it->get());
             it = enemies_.erase(it);
         } else ++it;
     }
 
     if (enemies_.empty()) {
-        int xpGained = 50 + (roomCount_ * 15);
-        for (auto& p : players_) {
-            if (p->addXp(xpGained)) {
-                dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
-            }
-        }
-        dmSay("The party gains " + std::to_string(xpGained) + " XP.");
-        roomCount_++;
-        if (actor) {
-            auto loot = LootSystem::generateLoot(roomCount_);
-            if (loot) {
-                if (loot->type == ItemType::WEAPON) actor->equippedWeapon = loot;
-                else if (loot->type == ItemType::ARMOR) { actor->equippedArmor = loot; actor->calculateAC(); }
-                dmSay(actor->name + " finds " + loot->getDescription() + " among the spoils.");
-                addJournalEntry(actor->name + " found loot: " + loot->getDescription());
-            }
-        }
-        spawnRoomContent();
-        generateRoomDescription();
-        rollInitiative();
+        enterClearedRoom(actor);
     } else {
         rebuildTurnOrder();
         // The attacker already spent their action on the killing blow — move on.
@@ -640,7 +669,11 @@ void Game::playerHeal(int targetPlayerIndex) {
     // Potion of Healing (SRD): 2d4+2. Anyone can drink one by spending a resource (supply).
     if (turnOrder_.empty()) return;
     Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->resources <= 0 || targetPlayerIndex < 0 || static_cast<size_t>(targetPlayerIndex) >= players_.size()) {
+    if (!actor || actor->isDowned || actor->isDead || actor->currentHp <= 0) {
+        lastEvent_ = "You're down — you can't use a potion until you're back up.";
+        return;
+    }
+    if (actor->resources <= 0 || targetPlayerIndex < 0 || static_cast<size_t>(targetPlayerIndex) >= players_.size()) {
         lastEvent_ = "No potions left (need a resource/supply).";
         return;
     }
@@ -658,7 +691,7 @@ void Game::playerHeal(int targetPlayerIndex) {
 void Game::playerSpecialAction(int targetEnemyIndex) {
     if (gameOver_ || turnOrder_.empty()) return;
     Character* actor = turnOrder_[static_cast<size_t>(currentTurnIndex_)];
-    if (!actor || actor->isDowned) return;
+    if (!actor || actor->isDowned || actor->isDead || actor->currentHp <= 0) return;
 
     int playerIdx = 0;
     for (size_t i = 0; i < players_.size(); ++i) if (players_[i].get() == actor) playerIdx = static_cast<int>(i);
@@ -771,6 +804,12 @@ void Game::playerRest(bool force) {
     dmSay("You catch your breath in a quiet alcove. This is a Short Rest — a Long Rest will have to wait for safer ground.");
     addJournalEntry("The party took a short rest.");
     addChatMessage("Combat", lastEvent_);
+    if (enemies_.empty()) {
+        // Remain in the cleared chamber so Search / Onward stay available.
+        turnOrder_.clear();
+        currentTurnIndex_ = 0;
+        return;
+    }
     rollInitiative();
 }
 
@@ -779,16 +818,34 @@ void Game::playerInteract(const std::string& playerName) {
     Character* hero = findCharacter(playerName);
     if (!hero || hero->isDead || hero->isDowned) return;
 
+    // Search only when the chamber is clear (not mid-fight).
+    if (!enemies_.empty()) {
+        lastEvent_ = "Too dangerous to Search while foes remain!";
+        dmSay("Clear the chamber first — then Search.");
+        return;
+    }
+    if (roomSearchUsed_) {
+        lastEvent_ = "You've already searched this room.";
+        dmSay("Nothing more turns up here — press Onward when ready.");
+        return;
+    }
+    // One meaningful Search per room (success or fail locks further Search).
+    roomSearchUsed_ = true;
+
     if (hero->performSavingThrow(hero->attributes.intelligence, 12)) {
-        hero->gold += 25;
-        lastEvent_ = hero->name + " found 25 gold pieces!";
+        int found = 15 + roomCount_ * 2 + getRandomInt(0, 10);
+        hero->gold += found;
+        lastEvent_ = hero->name + " searched and found " + std::to_string(found) + " gold pieces!";
+        addChatMessage("Combat", lastEvent_);
         dmSay("A successful Investigation check reveals a hidden pouch.");
+        addJournalEntry(lastEvent_);
     } else {
         hero->takeDamage(3);
         int idx = 0;
         for(size_t i=0; i<players_.size(); ++i) if(players_[i].get() == hero) idx = static_cast<int>(i);
         pushVisualEvent(VisualEventType::PLAYER_DAMAGE, idx);
         lastEvent_ = "Fail! A trap hit " + hero->name + " for 3 damage!";
+        addChatMessage("Combat", lastEvent_);
         dmSay("A pressure plate clicks — poison darts!");
         if (hero->isDead) {
             removeFromTurnOrder(hero);
@@ -796,10 +853,37 @@ void Game::playerInteract(const std::string& playerName) {
             return;
         }
     }
-    // Interact spends your turn like Attack/Heal.
+    // Interact spends your turn like Attack/Heal when initiative is active.
     if (!turnOrder_.empty()) {
         advanceTurn();
     }
+}
+
+void Game::playerAdvanceFromCleared() {
+    if (gameOver_) { lastEvent_ = "Game Over — start a new adventure."; return; }
+    if (isMerchantRoom_) {
+        lastEvent_ = "Use Leave to depart the merchant.";
+        return;
+    }
+    if (!enemies_.empty()) {
+        lastEvent_ = "Can't press Onward — foes remain!";
+        dmSay("Steel yourselves — finish the fight first.");
+        return;
+    }
+    roomCount_++;
+    roomSearchUsed_ = false;
+    spawnRoomContent();
+    if (!isMerchantRoom_) {
+        generateRoomDescription();
+        rollInitiative();
+    } else {
+        turnOrder_.clear();
+        currentTurnIndex_ = 0;
+    }
+    lastEvent_ = "You press deeper into the dungeon… Room " + std::to_string(roomCount_) + ".";
+    addChatMessage("Combat", lastEvent_);
+    dmSay("Onward — a new chamber opens before you.");
+    addJournalEntry("The party advanced to room " + std::to_string(roomCount_) + ".");
 }
 
 void Game::playerIncreaseStat(const std::string& playerName, int statIndex) {
@@ -1027,7 +1111,8 @@ std::string Game::getPartyStatus() const {
     std::stringstream ss;
     Character* current = (turnOrder_.empty() || currentTurnIndex_ < 0 || static_cast<size_t>(currentTurnIndex_) >= turnOrder_.size()) ? nullptr : turnOrder_[static_cast<size_t>(currentTurnIndex_)];
 
-    ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (isMerchantRoom_ ? "Safe" : "None")) << "\n";
+    const bool exploreBeat = isMerchantRoom_ || (enemies_.empty() && roomCount_ >= 1 && !dmOnlyTable_);
+    ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (exploreBeat ? "Safe" : "None")) << "\n";
     if (gameOver_) ss << "Game Over\n";
     if (dmOnlyTable_ && !dmName_.empty()) ss << "DM: " << dmName_ << "\n";
     for (const auto& p : players_) {
@@ -1075,7 +1160,7 @@ std::string Game::serialize() {
     std::string dmSafe = dmName_;
     for (char& c : dmSafe) { if (c == ',' || c == '|' || c == '~') c = '_'; }
     ss << sessionId_ << "," << roomCount_ << "," << (gameOver_ ? 1 : 0) << "," << currentTurnIndex_ << "," << (isMerchantRoom_ ? 1 : 0)
-       << "," << (dmOnlyTable_ ? 1 : 0) << "," << dmSafe << "|";
+       << "," << (dmOnlyTable_ ? 1 : 0) << "," << dmSafe << "," << (roomSearchUsed_ ? 1 : 0) << "|";
     // Section 1: Descriptions
     ss << roomDescription_ << "~" << lastEvent_ << "|";
     // Section 2: Players
@@ -1128,6 +1213,8 @@ void Game::deserialize(const std::string& data) {
             else dmOnlyTable_ = false;
             if (std::getline(ss_sub, val, ',')) dmName_ = val;
             else if (!dmOnlyTable_) dmName_.clear();
+            if (std::getline(ss_sub, val, ',')) roomSearchUsed_ = (val == "1");
+            else roomSearchUsed_ = false;
         }
     }
 

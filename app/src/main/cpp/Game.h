@@ -44,6 +44,8 @@ public:
     void playerInteract(const std::string& playerName);
     void playerRest(bool force = false);
     void playerIncreaseStat(const std::string& playerName, int statIndex);
+    /** Cleared-room advance (Onward) — not merchant Leave. */
+    void playerAdvanceFromCleared();
 
     // Merchant Actions
     bool buyItem(const std::string& playerName, int itemIndex);
@@ -80,6 +82,11 @@ public:
     bool isGameOver() const { return gameOver_; }
     bool isMerchantRoom() const { return isMerchantRoom_; }
     bool isInCombat() const { return !isMerchantRoom_ && !enemies_.empty(); }
+    /** No living foes, still in a dungeon chamber (Search/Rest/Onward beat). */
+    bool isRoomCleared() const {
+        return !gameOver_ && !isMerchantRoom_ && !dmOnlyTable_ && roomCount_ >= 1 && enemies_.empty();
+    }
+    bool hasSearchedRoom() const { return roomSearchUsed_; }
     int getRoomCount() const { return roomCount_; }
 
     const std::vector<std::unique_ptr<Character>>& getPlayers() const { return players_; }
@@ -125,6 +132,7 @@ private:
     bool isHost_ = false;
     bool isMerchantRoom_ = false;
     bool dmOnlyTable_ = false;
+    bool roomSearchUsed_ = false; // one Search attempt per chamber (anti-exploit)
     std::string dmName_;
 
     std::mt19937 rng_;
@@ -142,6 +150,8 @@ private:
     void checkPartyDefeat();
     void advanceTurn();
     void purgeDownedEnemies();
+    void enterClearedRoom(Character* actor);
+    void grantKillLoot(Character* actor, const std::string& foeName);
     void dmSay(const std::string& line);
     int proficiencyBonus() const;
     void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);
