@@ -167,6 +167,12 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_isMerchantRoom(JNIEnv *env, job
     return (jboolean)g_Game.isMerchantRoom();
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_isInCombat(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.isInCombat() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_doAttack(JNIEnv *env, jobject thiz, jint targetIndex) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
@@ -207,12 +213,13 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_doIncreaseStat(JNIEnv *env, job
     env->ReleaseStringUTFChars(playerName, nativeName);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_doBuyItem(JNIEnv *env, jobject thiz, jstring playerName, jint itemIndex) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
-    g_Game.buyItem(nativeName, itemIndex);
+    bool ok = g_Game.buyItem(nativeName ? nativeName : "", itemIndex);
     env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL

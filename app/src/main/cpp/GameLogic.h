@@ -75,6 +75,8 @@ struct Character {
 
     int initiative = 0;
     bool isDowned = false;
+    bool isStable = false;   // 3 death-save successes: skip further saves until heal/damage
+    bool isDead = false;     // 3 death-save failures: out of the fight (not party Game Over alone)
     int deathSaveSuccesses = 0;
     int deathSaveFailures = 0;
 
@@ -169,18 +171,49 @@ struct Character {
         return (rand() % 20 + 1 + Attributes::getModifier(attributeScore)) >= dc;
     }
 
-    void takeDamage(int amount) {
+    // amountCritical: treat as a critical hit while dying (2 failures) — 5e style.
+    void takeDamage(int amount, bool amountCritical = false) {
+        if (amount <= 0) return;
+        // Already dead: ignore further damage.
+        if (isDead) return;
+        // While dying (or stable at 0 HP): damage adds death-save failures, does not reset counters.
+        if (isDowned || (currentHp <= 0 && isStable)) {
+            if (isStable) {
+                isStable = false; // damage knocks you unconscious / unstable again
+                isDowned = true;
+            }
+            deathSaveFailures += amountCritical ? 2 : 1;
+            if (deathSaveFailures >= 3) {
+                isDead = true;
+                isDowned = true;
+                isStable = false;
+                deathSaveFailures = 3;
+            }
+            currentHp = 0;
+            return;
+        }
         currentHp = std::max(0, currentHp - amount);
         if (currentHp == 0) {
             isDowned = true;
+            isStable = false;
+            isDead = false;
             deathSaveSuccesses = 0;
             deathSaveFailures = 0;
         }
     }
 
     void heal(int amount) {
+        if (amount <= 0) return;
+        if (isDead) return; // permanently dead — needs magic not modeled here
         isDowned = false;
-        currentHp = std::min(maxHp, currentHp + amount);
+        isStable = false;
+        deathSaveSuccesses = 0;
+        deathSaveFailures = 0;
+        if (currentHp <= 0) {
+            currentHp = std::min(maxHp, amount);
+        } else {
+            currentHp = std::min(maxHp, currentHp + amount);
+        }
     }
 
     std::string getDetailedSheet() const {

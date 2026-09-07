@@ -42,11 +42,11 @@ public:
     void playerHeal(int targetPlayerIndex);
     void playerSpecialAction(int targetEnemyIndex);
     void playerInteract(const std::string& playerName);
-    void playerRest();
+    void playerRest(bool force = false);
     void playerIncreaseStat(const std::string& playerName, int statIndex);
 
     // Merchant Actions
-    void buyItem(const std::string& playerName, int itemIndex);
+    bool buyItem(const std::string& playerName, int itemIndex);
     std::string getShopManifest() const;
 
     // Turn Management
@@ -79,6 +79,7 @@ public:
 
     bool isGameOver() const { return gameOver_; }
     bool isMerchantRoom() const { return isMerchantRoom_; }
+    bool isInCombat() const { return !isMerchantRoom_ && !enemies_.empty(); }
     int getRoomCount() const { return roomCount_; }
 
     const std::vector<std::unique_ptr<Character>>& getPlayers() const { return players_; }
@@ -129,6 +130,9 @@ private:
     std::mt19937 rng_;
 
     void enemyTurn();
+    void removeFromTurnOrder(Character* c);
+    void checkPartyDefeat();
+    void advanceTurn();
     void dmSay(const std::string& line);
     int proficiencyBonus() const;
     void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);
