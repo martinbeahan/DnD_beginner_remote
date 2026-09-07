@@ -3,6 +3,7 @@ package com.fintrack.dndbeginnerremote
 /**
  * Beginner-friendly copy for tutorial + solo DM coaching.
  * Keeps explanations short and practical (5e SRD-flavored).
+ * Stat blurbs describe how *this* game uses attributes in C++ combat/search.
  */
 object BeginnerGuide {
 
@@ -41,6 +42,13 @@ object BeginnerGuide {
                 "• Search (Srch) — look for treasure or danger (skill check). Can find gold… or a trap."
         ),
         Page(
+            "Stats & leveling",
+            "Clear rooms to earn XP (see the gold XP bar under your turn banner).\n\n" +
+                "When you level up you get 2 attribute points — open Sheet to spend them.\n\n" +
+                "Your class cares most about one attack/heal stat plus Constitution for hit points. " +
+                "Tap Help → What do stats do? anytime."
+        ),
+        Page(
             "Playing solo",
             "Story adventure runs original quests (Ashen Lantern, then Millhollow's Debt):\n\n" +
                 "• Act 1: recover the Ashen Lantern from Hollowbarrow Crypt\n" +
@@ -61,12 +69,56 @@ object BeginnerGuide {
         |Potion — Heal 2d4+2 HP (uses a resource).
         |Short Rest — Recover some HP and resources.
         |Search — Investigate the room (risk/reward).
-        |Sheet — Your stats, HP, AC, gear.
+        |Sheet — Your stats, HP, AC, XP, gear.
         |Log — Adventure journal.
         |
         |Tip: AC is how hard you are to hit. Higher is better.
         |Tip: Resources power Specials and Potions — rest to regain some.
+        |Tip: XP fills as you clear rooms; level-ups grant attribute points.
     """.trimMargin()
+
+    /** Plain-English blurbs matching this build's C++ rules (SRD-safe wording). */
+    fun statBlurb(statIndex: Int): String = when (statIndex) {
+        0 -> "Strength — attack rolls & weapon damage for Fighters (and most melee)."
+        1 -> "Dexterity — Rogue attacks/damage; everyone's Armor Class and initiative."
+        2 -> "Constitution — hit points each level; helps Short Rest recovery. Spending CON also adds HP now."
+        3 -> "Intelligence — Wizard weapon attacks/damage; Search checks for loot (or traps)."
+        4 -> "Wisdom — Cleric weapon attacks/damage; boosts Healing Word amount."
+        5 -> "Charisma — classic sixth score; this adventure barely uses it in combat."
+        else -> "Attribute score — higher is usually better."
+    }
+
+    fun statShortHint(statIndex: Int): String = when (statIndex) {
+        0 -> "Melee hits & damage (Fighter)"
+        1 -> "AC, initiative, Rogue hits"
+        2 -> "More HP; better rests"
+        3 -> "Wizard hits; Search checks"
+        4 -> "Cleric hits; Healing Word"
+        5 -> "Rarely used here"
+        else -> ""
+    }
+
+    fun classStatTip(classId: Int): String = when (classId) {
+        0 -> "Fighter tip: prioritize Strength, then Constitution. Dexterity still helps AC."
+        1 -> "Wizard tip: prioritize Intelligence, then Constitution. Dexterity helps AC (light armor)."
+        2 -> "Rogue tip: prioritize Dexterity (hits, damage, AC), then Constitution."
+        3 -> "Cleric tip: prioritize Wisdom (attacks + Healing Word), then Constitution."
+        else -> "Boost your class's main attack stat and Constitution for survivability."
+    }
+
+    fun statsHelpMessage(): String = buildString {
+        appendLine("How stats work in this game")
+        appendLine()
+        for (i in 0..5) appendLine("• ${statBlurb(i)}")
+        appendLine()
+        appendLine("By class")
+        appendLine("• ${classStatTip(0)}")
+        appendLine("• ${classStatTip(1)}")
+        appendLine("• ${classStatTip(2)}")
+        appendLine("• ${classStatTip(3)}")
+        appendLine()
+        append("Level-up: clear rooms → earn XP → open Sheet when you (or an ally) level up and spend points.")
+    }
 
     fun specialBlurb(classId: Int): String = when (classId) {
         0 -> "Action Surge: take an extra burst and attack twice this turn."

@@ -40,6 +40,44 @@
                 android:textSize="11sp"
                 android:maxLines="1"
                 android:ellipsize="end" />
+
+            <LinearLayout
+                android:id="@+id/hudXpRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/hudXpLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="XP"
+                    android:textColor="@color/gold"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:layout_marginEnd="6dp" />
+
+                <ProgressBar
+                    android:id="@+id/hudXpBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="10dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressDrawable="@drawable/bg_xp_bar" />
+
+                <TextView
+                    android:id="@+id/hudXpText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0/100"
+                    android:textColor="@color/parchment"
+                    android:textSize="10sp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <Button

@@ -29,6 +29,14 @@
             android:textSize="12sp"
             android:text="Tap + / − on each attribute, then Confirm once. You may spend any or all points." />
 
+        <TextView
+            android:id="@+id/levelUpClassTip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/gold"
+            android:textSize="12sp" />
+
         <LinearLayout
             android:id="@+id/levelUpStatList"
             android:layout_width="match_parent"

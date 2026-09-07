@@ -30,6 +30,15 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var turnBanner: TextView
+    private var hudXpRow: View? = null
+    private var hudXpBar: ProgressBar? = null
+    private var hudXpText: TextView? = null
+    private var hudXpLabel: TextView? = null
+    /** name -> last known pendingStatPoints; used to fire level-up toasts. */
+    private val lastPendingByName = mutableMapOf<String, Int>()
+    private var sheetPulseAnimator: android.animation.ObjectAnimator? = null
+    private var lastLevelUpNotifyKey = ""
+    private var levelUpDialogShowing = false
     private lateinit var logText: TextView
     private lateinit var roomDescText: TextView
     private lateinit var chatInput: EditText
@@ -155,6 +164,10 @@ class MainActivity : AppCompatActivity() {
     external fun getPlayerStatus(): String
     external fun getBattleRoster(): String
     external fun getDetailedSheet(playerName: String): String
+    /** "xp,threshold,level,pending" for one hero; empty if missing. */
+    external fun getXpProgress(playerName: String): String
+    /** "name|xp|threshold|level|pending;..." for the whole party. */
+    external fun getPartyXpProgress(): String
     external fun getJournal(): String
     external fun getLastEvent(): String
     external fun getRoomDescription(): String
@@ -227,6 +240,10 @@ class MainActivity : AppCompatActivity() {
         
         statusText = findViewById(R.id.playerStatusText)
         turnBanner = findViewById(R.id.turnBanner)
+        hudXpRow = findViewById(R.id.hudXpRow)
+        hudXpBar = findViewById(R.id.hudXpBar)
+        hudXpText = findViewById(R.id.hudXpText)
+        hudXpLabel = findViewById(R.id.hudXpLabel)
         logText = findViewById(R.id.combatLogText)
         roomDescText = findViewById(R.id.roomDescText)
         chatInput = findViewById(R.id.chatInput)
@@ -439,6 +456,9 @@ class MainActivity : AppCompatActivity() {
     private fun resetToStartMenu() {
         sessionActive = false
         detachOnlineSession()
+        lastPendingByName.clear()
+        lastLevelUpNotifyKey = ""
+        sheetPulseAnimator?.cancel()
         prefs().edit().putBoolean("crash_guard", false).apply()
         showStartDialog()
     }
@@ -449,6 +469,22 @@ class MainActivity : AppCompatActivity() {
         hideSettingsOverlay()
         // Arm crash guard only while a real session is running.
         prefs().edit().putBoolean("crash_guard", true).apply()
+        // Seed pending snapshot so Continue with unspent points highlights Sheet
+        // without re-firing the level-up dialog.
+        seedPendingSnapshot(notifyHighlightOnly = true)
+    }
+
+    private fun seedPendingSnapshot(notifyHighlightOnly: Boolean) {
+        lastLevelUpNotifyKey = ""
+        lastPendingByName.clear()
+        if (!nativeReady) return
+        for ((name, prog) in parsePartyXpProgress()) {
+            lastPendingByName[name] = prog.pending
+        }
+        if (!notifyHighlightOnly) return
+        val anyPending = lastPendingByName.values.any { it > 0 }
+        val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (!dmTable) setSheetButtonHighlight(anyPending)
     }
 
     private fun currentActorName(): String {
@@ -1509,6 +1545,139 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+
+    data class XpProgress(val xp: Int, val need: Int, val level: Int, val pending: Int)
+
+    private fun parseXpProgress(playerName: String): XpProgress? {
+        if (!nativeReady || playerName.isBlank()) return null
+        val raw = try { getXpProgress(playerName) } catch (_: Exception) { "" }
+        if (raw.isBlank()) return null
+        val parts = raw.split(',')
+        if (parts.size < 4) return null
+        val xp = parts[0].toIntOrNull() ?: return null
+        val need = parts[1].toIntOrNull() ?: return null
+        val level = parts[2].toIntOrNull() ?: return null
+        val pending = parts[3].toIntOrNull() ?: return null
+        return XpProgress(xp, need, level, pending)
+    }
+
+    private fun parsePartyXpProgress(): List<Pair<String, XpProgress>> {
+        if (!nativeReady) return emptyList()
+        val raw = try { getPartyXpProgress() } catch (_: Exception) { "" }
+        if (raw.isBlank()) return emptyList()
+        return raw.split(';').mapNotNull { entry ->
+            val bits = entry.split('|')
+            if (bits.size < 5) return@mapNotNull null
+            val name = bits[0]
+            val xp = bits[1].toIntOrNull() ?: return@mapNotNull null
+            val need = bits[2].toIntOrNull() ?: return@mapNotNull null
+            val level = bits[3].toIntOrNull() ?: return@mapNotNull null
+            val pending = bits[4].toIntOrNull() ?: return@mapNotNull null
+            name to XpProgress(xp, need, level, pending)
+        }
+    }
+
+    private fun classIdFromSheet(sheet: String, forName: String): Int {
+        if (forName.equals(localPlayerName, true)) return localClassId
+        val lvlLine = sheet.lineSequence().firstOrNull { it.startsWith("Lvl ") }.orEmpty()
+        return Regex("""Lvl \d+ (\w+)""").find(lvlLine)?.groupValues?.getOrNull(1)?.let {
+            when (it) {
+                "Fighter" -> 0; "Wizard" -> 1; "Rogue" -> 2; "Cleric" -> 3; else -> localClassId
+            }
+        } ?: localClassId
+    }
+
+    private fun refreshHudXp() {
+        val row = hudXpRow ?: return
+        val bar = hudXpBar ?: return
+        val label = hudXpText ?: return
+        val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (dmTable || !sessionActive) {
+            row.visibility = View.GONE
+            return
+        }
+        row.visibility = View.VISIBLE
+        val prog = parseXpProgress(localPlayerName)
+        if (prog == null) {
+            label.text = "—"
+            bar.progress = 0
+            return
+        }
+        bar.max = prog.need.coerceAtLeast(1)
+        bar.progress = prog.xp.coerceIn(0, bar.max)
+        label.text = "${prog.xp}/${prog.need}"
+        hudXpLabel?.text = "XP L${prog.level}"
+    }
+
+    private fun setSheetButtonHighlight(active: Boolean) {
+        if (active) {
+            btnSheet.text = "Sheet!"
+            btnSheet.setTextColor(getColor(R.color.gold))
+            if (sheetPulseAnimator == null) {
+                sheetPulseAnimator = android.animation.ObjectAnimator.ofFloat(btnSheet, "alpha", 1f, 0.45f).apply {
+                    duration = 650
+                    repeatMode = android.animation.ValueAnimator.REVERSE
+                    repeatCount = android.animation.ValueAnimator.INFINITE
+                    start()
+                }
+            } else if (sheetPulseAnimator?.isRunning != true) {
+                sheetPulseAnimator?.start()
+            }
+        } else {
+            sheetPulseAnimator?.cancel()
+            btnSheet.alpha = 1f
+            if (!(isOnlineHost && try { isDmTable() } catch (_: Exception) { false })) {
+                btnSheet.text = "Sheet"
+            }
+            btnSheet.setTextColor(getColor(R.color.parchment))
+        }
+    }
+
+    private fun maybeNotifyLevelUps() {
+        if (!sessionActive || !nativeReady) return
+        val party = parsePartyXpProgress()
+        if (party.isEmpty()) return
+        val newly = mutableListOf<Pair<String, Int>>()
+        var anyPending = false
+        for ((name, prog) in party) {
+            val prev = lastPendingByName[name] ?: 0
+            if (prog.pending > prev) {
+                newly.add(name to prog.level)
+            }
+            lastPendingByName[name] = prog.pending
+            if (prog.pending > 0) anyPending = true
+        }
+        // Drop names that left the party
+        val alive = party.map { it.first }.toSet()
+        lastPendingByName.keys.retainAll(alive)
+
+        val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (!dmTable) setSheetButtonHighlight(anyPending)
+
+        if (newly.isEmpty()) return
+        val key = newly.joinToString("|") { "${it.first}:${it.second}" }
+        if (key == lastLevelUpNotifyKey) return
+        lastLevelUpNotifyKey = key
+        val msg = newly.joinToString("\n") { (name, lvl) ->
+            "$name reached level $lvl — open Sheet to spend points"
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        appendCombatFeed("LEVEL UP: ${newly.joinToString(", ") { it.first }}")
+        // One-shot banner dialog for the first new leveler this tick
+        if (isFinishing || levelUpDialogShowing) return
+        val (who, lvl) = newly.first()
+        levelUpDialogShowing = true
+        AlertDialog.Builder(this)
+            .setTitle("Level up!")
+            .setMessage("$who reached level $lvl.\n\nOpen Sheet (or Ally) to assign attribute points.")
+            .setPositiveButton("Open Sheet") { _, _ ->
+                showCharacterSheet(who)
+            }
+            .setNegativeButton("Later", null)
+            .setOnDismissListener { levelUpDialogShowing = false }
+            .show()
+    }
+
     private fun showCharacterSheet(forName: String = localPlayerName) {
         if (!nativeReady) return
         val sheet = try { getDetailedSheet(forName) } catch (_: Exception) { "Hero not found." }
@@ -1545,6 +1714,19 @@ class MainActivity : AppCompatActivity() {
         resourcesTv.text = if (res != null) {
             "Resources: ${res.groupValues[1]}/${res.groupValues[2]}"
         } else "Resources: —"
+        val xpProg = parseXpProgress(forName)
+        val sheetXpLabel = view.findViewById<TextView>(R.id.sheetXpLabel)
+        val sheetXpBar = view.findViewById<ProgressBar>(R.id.sheetXpBar)
+        if (xpProg != null) {
+            val (xp, need, lvl, _) = xpProg
+            sheetXpLabel.text = "XP $xp/$need · Level $lvl → ${lvl + 1}"
+            sheetXpBar.max = need.coerceAtLeast(1)
+            sheetXpBar.progress = xp.coerceIn(0, sheetXpBar.max)
+            sheetXpBar.progressDrawable = getDrawable(R.drawable.bg_xp_bar)?.mutate()
+        } else {
+            sheetXpLabel.text = "XP —"
+            sheetXpBar.progress = 0
+        }
         fun stat(key: String): String {
             val m = Regex("""$key:\s*(\d+)\s*\(([^)]+)\)""").find(sheet)
             return if (m != null) "$key ${m.groupValues[1]} (${m.groupValues[2]})" else "$key —"
@@ -1555,6 +1737,8 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<TextView>(R.id.sheetStatInt).text = stat("INT")
         view.findViewById<TextView>(R.id.sheetStatWis).text = stat("WIS")
         view.findViewById<TextView>(R.id.sheetStatCha).text = stat("CHA")
+        view.findViewById<TextView>(R.id.sheetStatTips).text =
+            (0..5).joinToString("\n") { "• ${BeginnerGuide.statShortHint(it)}" }
         val weapon = sheet.lineSequence().firstOrNull { it.startsWith("Weapon:") }?.removePrefix("Weapon:")?.trim()
         val armor = sheet.lineSequence().firstOrNull { it.startsWith("Armor:") }?.removePrefix("Armor:")?.trim()
         equippedTv.text = buildString {
@@ -1569,6 +1753,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } ?: 1
         }
+        view.findViewById<TextView>(R.id.sheetClassTip).text = BeginnerGuide.classStatTip(classId)
         portrait.setImageResource(spriteFor(BattleUnit(true, forName, classId, cur, max)))
         val canLevel = sheet.contains("POINTS TO SPEND")
         if (canLevel) {
@@ -1736,6 +1921,9 @@ class MainActivity : AppCompatActivity() {
         val remainingTv = view.findViewById<TextView>(R.id.levelUpRemaining)
         val list = view.findViewById<LinearLayout>(R.id.levelUpStatList)
         val confirmBtn = view.findViewById<Button>(R.id.levelUpConfirm)
+        val classTipTv = view.findViewById<TextView>(R.id.levelUpClassTip)
+        val classIdForTips = classIdFromSheet(sheet, forName)
+        classTipTv.text = BeginnerGuide.classStatTip(classIdForTips)
         val rowUis = mutableListOf<Triple<Button, TextView, Button>>()
 
         fun refreshUi() {
@@ -1771,6 +1959,7 @@ class MainActivity : AppCompatActivity() {
             row.findViewById<TextView>(R.id.statAssignName).text = "$short · $full"
             row.findViewById<TextView>(R.id.statAssignCurrent).text =
                 "Now ${baseScores[index]} → ${baseScores[index]}"
+            row.findViewById<TextView>(R.id.statAssignBlurb).text = BeginnerGuide.statShortHint(index)
             val minus = row.findViewById<Button>(R.id.statAssignMinus)
             val addTv = row.findViewById<TextView>(R.id.statAssignAdd)
             val plus = row.findViewById<Button>(R.id.statAssignPlus)
@@ -2117,6 +2306,8 @@ class MainActivity : AppCompatActivity() {
             handlePartyWipeUi()
         }
 
+        refreshHudXp()
+        maybeNotifyLevelUps()
         refreshBattleBackground()
         refreshBattleArena()
         if (!isGameOver) maybeSoloDmCoach(status, isShop)
@@ -2825,6 +3016,7 @@ class MainActivity : AppCompatActivity() {
         val options = arrayOf(
             "Show beginner tutorial",
             "Action quick reference",
+            "What do stats do?",
             "Toggle solo DM tips",
             "Settings…"
         )
@@ -2838,13 +3030,18 @@ class MainActivity : AppCompatActivity() {
                         .setMessage(BeginnerGuide.actionReference())
                         .setPositiveButton("Got it", null)
                         .show()
-                    2 -> {
+                    2 -> AlertDialog.Builder(this)
+                        .setTitle("Stats in this game")
+                        .setMessage(BeginnerGuide.statsHelpMessage())
+                        .setPositiveButton("Got it", null)
+                        .show()
+                    3 -> {
                         soloCoachEnabled = !soloCoachEnabled
                         val state = if (soloCoachEnabled) "ON" else "OFF"
                         Toast.makeText(this, "Solo DM tips: $state", Toast.LENGTH_SHORT).show()
                         prefs().edit().putBoolean("solo_coach_enabled", soloCoachEnabled).apply()
                     }
-                    3 -> showSettingsOverlay()
+                    4 -> showSettingsOverlay()
                 }
             }
             .setNegativeButton("Close", null)

@@ -257,6 +257,7 @@ struct Character {
         ss << "Lvl " << level << " " << getClassName() << " | Gold: " << gold << "\n";
         if (pendingStatPoints > 0) ss << "POINTS TO SPEND: " << pendingStatPoints << "\n";
         ss << "HP: " << currentHp << "/" << maxHp << " | AC: " << armorClass << "\n";
+        ss << "XP: " << xp << "/" << xpToNextLevel() << " (to Lvl " << (level + 1) << ")\n";
         ss << "Resources: " << resources << "/" << maxResources << "\n";
         ss << "STR: " << attributes.strength << " (" << showMod(attributes.strength) << ")\n";
         ss << "DEX: " << attributes.dexterity << " (" << showMod(attributes.dexterity) << ")\n";
@@ -268,6 +269,9 @@ struct Character {
         ss << "Armor: " << (equippedArmor ? equippedArmor->getDescription() : "None") << "\n";
         return ss.str();
     }
+
+    /** XP required to leave the current level (matches addXp threshold). */
+    int xpToNextLevel() const { return level * 100; }
 
     std::string getClassName() const {
         switch(characterClass) {
