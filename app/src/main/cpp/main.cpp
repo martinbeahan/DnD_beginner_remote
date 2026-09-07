@@ -9,6 +9,7 @@
 #include "AndroidOut.h"
 #include "Renderer.h"
 #include "Game.h"
+#include <sstream>
 
 // Persistent game state that survives window destruction
 static dnd::Game g_Game;
@@ -401,6 +402,43 @@ JNIEXPORT jstring JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_getBattleRoster(JNIEnv *env, jobject thiz) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     return env->NewStringUTF(g_Game.getBattleRoster().c_str());
+}
+
+
+JNIEXPORT jstring JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getXpProgress(JNIEnv *env, jobject thiz, jstring playerName) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    std::string nameStr(nativeName ? nativeName : "");
+    env->ReleaseStringUTFChars(playerName, nativeName);
+
+    for (const auto& p : g_Game.getPlayers()) {
+        if (p && p->name == nameStr) {
+            // xp,threshold,level,pending
+            std::string out = std::to_string(p->xp) + "," +
+                std::to_string(p->xpToNextLevel()) + "," +
+                std::to_string(p->level) + "," +
+                std::to_string(p->pendingStatPoints);
+            return env->NewStringUTF(out.c_str());
+        }
+    }
+    return env->NewStringUTF("");
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getPartyXpProgress(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    std::stringstream ss;
+    bool first = true;
+    for (const auto& p : g_Game.getPlayers()) {
+        if (!p) continue;
+        if (!first) ss << ";";
+        first = false;
+        // name|xp|threshold|level|pending
+        ss << p->name << "|" << p->xp << "|" << p->xpToNextLevel()
+           << "|" << p->level << "|" << p->pendingStatPoints;
+    }
+    return env->NewStringUTF(ss.str().c_str());
 }
 
 } // extern "C"

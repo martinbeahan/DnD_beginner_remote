@@ -90,6 +90,33 @@
             android:textSize="13sp" />
 
         <TextView
+            android:id="@+id/sheetXpLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="XP"
+            android:textColor="@color/parchment"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/sheetXpBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="12dp"
+            android:layout_marginTop="4dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/bg_xp_bar" />
+
+        <TextView
+            android:id="@+id/sheetClassTip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/gold"
+            android:textSize="12sp" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
@@ -118,6 +145,15 @@
             <TextView android:id="@+id/sheetStatWis" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
             <TextView android:id="@+id/sheetStatCha" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/sheetStatTips"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/parchment"
+            android:textSize="11sp"
+            android:lineSpacingExtra="2dp" />
 
         <TextView
             android:id="@+id/sheetEquipped"
