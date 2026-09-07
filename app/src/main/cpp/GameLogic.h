@@ -216,6 +216,35 @@ struct Character {
         }
     }
 
+    /** Party-wipe continue: clear death locks and set HP (difficulty-tuned by caller). */
+    void reviveAfterWipe(int hp) {
+        isDead = false;
+        isDowned = false;
+        isStable = false;
+        deathSaveSuccesses = 0;
+        deathSaveFailures = 0;
+        currentHp = std::max(1, std::min(maxHp, hp));
+    }
+
+    /** Hard difficulty: strip gold + equipped gear back to class starters. Stats/level kept. */
+    void stripGearAndGoldToStarters() {
+        gold = 0;
+        if (characterClass == CharacterClass::FIGHTER) {
+            equippedWeapon = std::make_shared<Item>(Item{"Longsword", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Chain Shirt", ItemType::ARMOR, 3});
+        } else if (characterClass == CharacterClass::ROGUE) {
+            equippedWeapon = std::make_shared<Item>(Item{"Shortsword", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Leather Armor", ItemType::ARMOR, 1});
+        } else if (characterClass == CharacterClass::WIZARD) {
+            equippedWeapon = std::make_shared<Item>(Item{"Quarterstaff", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Traveler Clothes", ItemType::ARMOR, 0});
+        } else {
+            equippedWeapon = std::make_shared<Item>(Item{"Mace", ItemType::WEAPON, 0});
+            equippedArmor = std::make_shared<Item>(Item{"Scale Mail", ItemType::ARMOR, 4});
+        }
+        calculateAC();
+    }
+
     std::string getDetailedSheet() const {
         std::stringstream ss;
         ss << "--- " << name << " ---\n";

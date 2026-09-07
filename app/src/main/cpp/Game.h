@@ -27,7 +27,9 @@ struct VisualEvent {
 class Game {
 public:
     Game();
-    void startNewGame(CharacterClass selectedClass = CharacterClass::FIGHTER, const std::string& playerName = "Hero");
+    void startNewGame(CharacterClass selectedClass = CharacterClass::FIGHTER, const std::string& playerName = "Hero",
+                      int soloPlayMode = static_cast<int>(SoloPlayMode::STORY),
+                      int difficulty = static_cast<int>(Difficulty::EASY));
     void startDmSession(const std::string& dmName);
     void addAlly(const std::string& name, CharacterClass cl);
     void dmBeginDungeon();
@@ -69,6 +71,12 @@ public:
     void addJournalEntry(const std::string& entry);
     std::string getJournal() const;
 
+    void setDifficulty(int d);
+    int getDifficulty() const { return difficulty_; }
+    int getSoloPlayMode() const { return soloPlayMode_; }
+    /** Easy/Medium/Hard party-wipe continue. Nightmare should clear save in UI instead. */
+    bool recoverFromPartyWipe();
+
     // Networking/Persistence
     std::string serialize();
     void deserialize(const std::string& data);
@@ -92,10 +100,12 @@ public:
     int getQuestBeat() const { return questBeat_; }
     bool isQuestLanternRecovered() const { return questLanternRecovered_; }
     bool isQuestComplete() const { return questComplete_; }
-    /** Solo scripted Ashen Lantern beats (1–6); false for Host-as-DM / online lobby. */
+    /** Solo scripted Act 1 (1–6) or Act 2 (8–13); false for crawl / Host-as-DM / online. */
     bool isSoloQuestScripted() const {
-        return questBeat_ >= static_cast<int>(SoloQuestBeat::MILLHOLLOW)
-            && questBeat_ <= static_cast<int>(SoloQuestBeat::RESOLUTION);
+        return isScriptedSoloBeat(questBeat_);
+    }
+    bool isSoloCrawl() const {
+        return soloPlayMode_ == static_cast<int>(SoloPlayMode::CRAWL);
     }
 
     const std::vector<std::unique_ptr<Character>>& getPlayers() const { return players_; }
@@ -142,11 +152,15 @@ private:
     bool isMerchantRoom_ = false;
     bool dmOnlyTable_ = false;
     bool roomSearchUsed_ = false; // one Search attempt per chamber (anti-exploit)
-    // Solo Ashen Lantern quest (original; SRD-compatible monsters only). Online DM path leaves beat at NONE.
+    // Solo story / crawl (original; SRD-compatible monsters only). Online DM path leaves beat at NONE.
     int questBeat_ = 0;
     bool questLanternRecovered_ = false;
-    bool questComplete_ = false;
+    bool questComplete_ = false;       // Act 1 (Ashen Lantern) finished
     bool questCryptKeyFound_ = false;
+    bool questAct2Complete_ = false;   // Act 2 (Millhollow's Debt) finished
+    bool questAct2LedgerFound_ = false;
+    int soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
+    int difficulty_ = static_cast<int>(Difficulty::EASY);
     std::string dmName_;
 
     std::mt19937 rng_;
@@ -172,7 +186,11 @@ private:
     void spawnSoloQuestEnemies();
     void grantAshenLantern(Character* actor);
     void maybeFinishQuestOnResolutionEnter();
+    void maybeFinishAct2OnSettledEnter();
     bool trySoloQuestSearch(Character* hero);
+    void revivePartyForDifficulty();
+    void rollbackOneRoomOrBeat();
+    void applyStarterPaddingForStory();
     int proficiencyBonus() const;
     void resolveEnemyDefeated(Character* actor, int targetEnemyIndex);
     bool performWeaponAttack(Character* actor, Character& target, int attackerVisualIndex, bool targetIsEnemy, int targetIndex, bool sneakAttack);

@@ -64,6 +64,17 @@
                 android:buttonTint="@color/gold"
                 android:paddingBottom="4dp" />
 
+            <TextView
+                android:id="@+id/settingsDifficultyText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="40dp"
+                android:gravity="center_vertical"
+                android:text="Difficulty: Easy (locked for current run)"
+                android:textColor="@color/parchment"
+                android:textSize="13sp"
+                android:paddingBottom="8dp" />
+
             <CheckBox
                 android:id="@+id/chkDmVoice"
                 android:layout_width="match_parent"

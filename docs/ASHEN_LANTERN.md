@@ -41,3 +41,7 @@ Solo beats use distinct CC0 battle backgrounds (road/woods/crypt/vault/dungeon) 
 ## Out of scope
 
 Further 3D/engine rewrites, copying WotC modules, multiplayer campaign sync of quest beats.
+
+## v1.7 note
+
+Act 2 (Millhollow's Debt), Dungeon Crawl mode, and Difficulty wipe rules: see `docs/ACT2_CRAWL_DIFFICULTY.md`.
