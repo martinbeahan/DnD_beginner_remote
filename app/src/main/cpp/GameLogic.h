@@ -87,6 +87,13 @@ struct Character {
 
     Character(std::string n, CharacterClass c, std::string id = "local")
         : name(std::move(n)), uid(std::move(id)), characterClass(c), level(1), xp(0) {
+        // Base class arrays once; never re-applied on level-up (spent points must stick).
+        switch (characterClass) {
+            case CharacterClass::FIGHTER: attributes = {16, 12, 14, 8, 10, 10}; break;
+            case CharacterClass::WIZARD:  attributes = {8, 14, 12, 16, 10, 10}; break;
+            case CharacterClass::ROGUE:   attributes = {10, 16, 12, 12, 10, 14}; break;
+            case CharacterClass::CLERIC:  attributes = {14, 10, 14, 10, 16, 12}; break;
+        }
         applyStatsForLevel();
         currentHp = maxHp;
         resources = maxResources;
@@ -112,22 +119,19 @@ struct Character {
         armorClass = 10 + dexMod + armorBonus;
     }
 
+    /** Recompute HP/resources from current level + attributes. Does NOT reset attributes. */
     void applyStatsForLevel() {
         switch (characterClass) {
             case CharacterClass::FIGHTER:
-                attributes = {16, 12, 14, 8, 10, 10};
                 maxResources = 2 + (level / 2); // Action Surge uses
                 break;
             case CharacterClass::WIZARD:
-                attributes = {8, 14, 12, 16, 10, 10};
                 maxResources = 2 + level; // spell slots (simplified)
                 break;
             case CharacterClass::ROGUE:
-                attributes = {10, 16, 12, 12, 10, 14};
                 maxResources = 1 + (level / 3);
                 break;
             case CharacterClass::CLERIC:
-                attributes = {14, 10, 14, 10, 16, 12};
                 maxResources = 2 + level;
                 break;
         }
