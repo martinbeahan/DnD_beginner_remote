@@ -243,6 +243,53 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_addRemoteAlly(JNIEnv *env, jobj
     env->ReleaseStringUTFChars(playerName, nativeName);
 }
 
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_startDmSession(JNIEnv *env, jobject thiz, jstring dmName) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(dmName, nullptr);
+    g_Game.startDmSession(nativeName ? nativeName : "Dungeon Master");
+    env->ReleaseStringUTFChars(dmName, nativeName);
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_dmBeginDungeon(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.dmBeginDungeon();
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_dmAdvanceRoom(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.dmAdvanceRoom();
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_dmNarrate(JNIEnv *env, jobject thiz, jstring line) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeLine = env->GetStringUTFChars(line, nullptr);
+    g_Game.dmNarrate(nativeLine ? nativeLine : "");
+    env->ReleaseStringUTFChars(line, nativeLine);
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_dmGrantShortRest(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.dmGrantShortRest();
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_prepareClientJoin(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.prepareClientJoin();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_isDmTable(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.isDmOnlyTable() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_saveGameState(JNIEnv *env, jobject thiz) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);

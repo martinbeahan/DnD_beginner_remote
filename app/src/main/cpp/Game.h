@@ -27,7 +27,15 @@ class Game {
 public:
     Game();
     void startNewGame(CharacterClass selectedClass = CharacterClass::FIGHTER, const std::string& playerName = "Hero");
+    void startDmSession(const std::string& dmName);
     void addAlly(const std::string& name, CharacterClass cl);
+    void dmBeginDungeon();
+    void dmAdvanceRoom();
+    void dmNarrate(const std::string& line);
+    void dmGrantShortRest();
+    void prepareClientJoin();
+    std::string getDmName() const { return dmName_; }
+    bool isDmOnlyTable() const { return dmOnlyTable_; }
 
     // Player Actions
     void playerAttack(int targetEnemyIndex);
@@ -115,6 +123,8 @@ private:
     bool gameOver_;
     bool isHost_ = false;
     bool isMerchantRoom_ = false;
+    bool dmOnlyTable_ = false;
+    std::string dmName_;
 
     std::mt19937 rng_;
 

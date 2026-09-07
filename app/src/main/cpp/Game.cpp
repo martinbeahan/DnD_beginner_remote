@@ -7,7 +7,7 @@
 
 namespace dnd {
 
-Game::Game() : currentTurnIndex_(0), turnCounter_(0), roomCount_(0), gameOver_(false), isHost_(false), isMerchantRoom_(false) {
+Game::Game() : currentTurnIndex_(0), turnCounter_(0), roomCount_(0), gameOver_(false), isHost_(false), isMerchantRoom_(false), dmOnlyTable_(false) {
     std::random_device rd;
     rng_.seed(rd());
 
@@ -29,6 +29,8 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     gameOver_ = false;
     turnCounter_ = 0;
     roomCount_ = 1;
+    dmOnlyTable_ = false;
+    dmName_.clear();
 
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
     addAlly("Melf (NPC)", CharacterClass::WIZARD);
@@ -42,6 +44,111 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     addJournalEntry("The party entered the dungeon.");
     dmSay("Welcome, adventurers. I am your Dungeon Master. Steel yourselves — danger waits in the dark.");
     dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, and Short Rest to recover.");
+}
+
+void Game::startDmSession(const std::string& dmName) {
+    turnOrder_.clear();
+    players_.clear();
+    enemies_.clear();
+    chatHistory_.clear();
+    journalEntries_.clear();
+    shopInventory_.clear();
+    while(!visualEvents_.empty()) visualEvents_.pop();
+
+    gameOver_ = false;
+    turnCounter_ = 0;
+    roomCount_ = 0;
+    isMerchantRoom_ = false;
+    dmOnlyTable_ = true;
+    dmName_ = dmName.empty() ? "Dungeon Master" : dmName;
+    isHost_ = true;
+
+    roomDescription_ = "A candlelit tavern table waits for heroes. The DM (" + dmName_ + ") prepares the adventure. Share the session ID so friends can Join.";
+    lastEvent_ = "DM table open — waiting for players to join.";
+    addChatMessage("System", "DM " + dmName_ + " opened an online table.");
+    addJournalEntry("The DM lit the candles and opened the table.");
+    dmSay("I am " + dmName_ + ", your Dungeon Master. When heroes Join, I will begin the dungeon.");
+}
+
+void Game::dmBeginDungeon() {
+    if (players_.empty()) {
+        lastEvent_ = "No heroes have joined yet.";
+        dmSay("Patience — wait for at least one adventurer to Join the session.");
+        return;
+    }
+    roomCount_ = 1;
+    isMerchantRoom_ = false;
+    gameOver_ = false;
+    generateRoomDescription();
+    spawnRoomContent();
+    rollInitiative();
+    lastEvent_ = "The dungeon begins! Room 1 — roll for initiative!";
+    addChatMessage("System", "The DM began the dungeon.");
+    dmSay("The tavern doors close behind you. Steel yourselves.");
+}
+
+void Game::dmAdvanceRoom() {
+    if (players_.empty()) {
+        lastEvent_ = "No party to advance.";
+        return;
+    }
+    if (gameOver_) {
+        lastEvent_ = "Game Over — start a new table.";
+        return;
+    }
+    roomCount_++;
+    spawnRoomContent();
+    if (!isMerchantRoom_) {
+        generateRoomDescription();
+        rollInitiative();
+    } else {
+        turnOrder_.clear();
+        currentTurnIndex_ = 0;
+    }
+    lastEvent_ = "DM advanced the party to room " + std::to_string(roomCount_) + ".";
+    addChatMessage("System", lastEvent_);
+    dmSay("Onward — a new chamber opens before you.");
+}
+
+void Game::dmNarrate(const std::string& line) {
+    if (line.empty()) return;
+    roomDescription_ = line;
+    dmSay(line);
+    lastEvent_ = "DM narrates…";
+}
+
+
+void Game::prepareClientJoin() {
+    turnOrder_.clear();
+    players_.clear();
+    enemies_.clear();
+    chatHistory_.clear();
+    journalEntries_.clear();
+    shopInventory_.clear();
+    while (!visualEvents_.empty()) visualEvents_.pop();
+
+    gameOver_ = false;
+    turnCounter_ = 0;
+    roomCount_ = 0;
+    isMerchantRoom_ = false;
+    dmOnlyTable_ = false;
+    dmName_.clear();
+    isHost_ = false;
+    currentTurnIndex_ = 0;
+
+    roomDescription_ = "Connecting to the DM table…";
+    lastEvent_ = "Waiting for the Dungeon Master to sync the party…";
+    addChatMessage("System", "Joining online session…");
+}
+
+void Game::dmGrantShortRest() {
+    if (gameOver_ || players_.empty()) return;
+    // Reuse short-rest recovery without merchant leave logic
+    bool wasMerchant = isMerchantRoom_;
+    isMerchantRoom_ = false;
+    playerRest();
+    isMerchantRoom_ = wasMerchant;
+    dmSay("The DM grants a short rest.");
 }
 
 void Game::addAlly(const std::string& name, CharacterClass cl) {
@@ -547,6 +654,7 @@ std::string Game::getPartyStatus() const {
 
     ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (isMerchantRoom_ ? "Safe" : "None")) << "\n";
     if (gameOver_) ss << "Game Over\n";
+    if (dmOnlyTable_ && !dmName_.empty()) ss << "DM: " << dmName_ << "\n";
     for (const auto& p : players_) {
         ss << p->name << " | HP: " << p->currentHp << "/" << p->maxHp << (p->isDowned ? " [DOWN]" : "") << "\n";
     }
@@ -585,7 +693,10 @@ std::string Game::getSpecialActionName() const {
 std::string Game::serialize() {
     std::stringstream ss;
     // Section 0: Header
-    ss << sessionId_ << "," << roomCount_ << "," << (gameOver_ ? 1 : 0) << "," << currentTurnIndex_ << "," << (isMerchantRoom_ ? 1 : 0) << "|";
+    std::string dmSafe = dmName_;
+    for (char& c : dmSafe) { if (c == ',' || c == '|' || c == '~') c = '_'; }
+    ss << sessionId_ << "," << roomCount_ << "," << (gameOver_ ? 1 : 0) << "," << currentTurnIndex_ << "," << (isMerchantRoom_ ? 1 : 0)
+       << "," << (dmOnlyTable_ ? 1 : 0) << "," << dmSafe << "|";
     // Section 1: Descriptions
     ss << roomDescription_ << "~" << lastEvent_ << "|";
     // Section 2: Players
@@ -632,6 +743,10 @@ void Game::deserialize(const std::string& data) {
             if (std::getline(ss_sub, val, ',')) gameOver_ = (val == "1");
             if (std::getline(ss_sub, val, ',')) currentTurnIndex_ = std::stoi(val);
             if (std::getline(ss_sub, val, ',')) isMerchantRoom_ = (val == "1");
+            if (std::getline(ss_sub, val, ',')) dmOnlyTable_ = (val == "1");
+            else dmOnlyTable_ = false;
+            if (std::getline(ss_sub, val, ',')) dmName_ = val;
+            else if (!dmOnlyTable_) dmName_.clear();
         }
     }
 

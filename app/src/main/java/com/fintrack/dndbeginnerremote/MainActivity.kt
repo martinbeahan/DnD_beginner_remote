@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     /** True when joined someone else's session. */
     private var isOnlineClient = false
     private var onlineSessionId = ""
+    private var remoteDmName = ""
 
     companion object {
         private const val NATIVE_LIB = "dndbeginnerremote"
@@ -120,6 +121,13 @@ class MainActivity : AppCompatActivity() {
     external fun sendChatMessage(sender: String, message: String)
     external fun processGameTurn()
     external fun resetGame(characterClass: Int, playerName: String)
+    external fun startDmSession(dmName: String)
+    external fun dmBeginDungeon()
+    external fun dmAdvanceRoom()
+    external fun dmNarrate(line: String)
+    external fun dmGrantShortRest()
+    external fun isDmTable(): Boolean
+    external fun prepareClientJoin()
     external fun saveGameState(): String
     external fun loadGameState(data: String)
 
@@ -199,7 +207,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        btnSheet.setOnClickListener { showCharacterSheet() }
+        btnSheet.setOnClickListener {
+            if (isOnlineHost && (try { isDmTable() } catch (_: Exception) { true })) showDmToolsDialog()
+            else showCharacterSheet()
+        }
         btnJournal.setOnClickListener { showJournal() }
         btnHelp.setOnClickListener { showHelpMenu() }
         btnReset.setOnClickListener { showStartDialog() }
@@ -363,6 +374,16 @@ class MainActivity : AppCompatActivity() {
 
         if (asHost) {
             mp.publishMeta(localPlayerName, role = "dm")
+            mp.listenForLobby { name, classId ->
+                runOnUiThread {
+                    try {
+                        admitPlayer(name, classId)
+                        syncAndSave()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "lobby admit failed", e)
+                    }
+                }
+            }
             mp.listenForActions { actionId, action ->
                 runOnUiThread {
                     try {
@@ -372,6 +393,13 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         Log.e(TAG, "host action failed", e)
                     }
+                }
+            }
+        } else {
+            mp.listenForMeta { name ->
+                runOnUiThread {
+                    remoteDmName = name
+                    updateUi()
                 }
             }
         }
@@ -412,6 +440,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun partyHasPlayer(name: String): Boolean {
+        return try {
+            val partySide = getBattleRoster().substringBefore('|')
+            partySide.split(';').any { entry ->
+                entry.split(',').getOrNull(1)?.equals(name, ignoreCase = true) == true
+            }
+        } catch (_: Exception) {
+            getPlayerStatus().lineSequence().any {
+                it.startsWith("$name |") || it.startsWith("$name|")
+            }
+        }
+    }
+
+    private fun admitPlayer(player: String, classId: Int) {
+        if (partyHasPlayer(player)) return
+        addRemoteAlly(classId, player)
+        try { sendChatMessage("DM", "$player has joined the party.") } catch (_: Exception) {}
+        Toast.makeText(this, "$player joined the table.", Toast.LENGTH_SHORT).show()
+        lastBattleRoster = ""
+        refreshBattleArena()
+    }
+
     private fun applyHostAction(action: Map<String, Any>) {
         val type = action["type"]?.toString() ?: return
         val player = action["playerName"]?.toString() ?: "Hero"
@@ -423,13 +473,7 @@ class MainActivity : AppCompatActivity() {
             ?: 0
 
         when (type) {
-            "join" -> {
-                if (!getPlayerStatus().contains(player)) {
-                    addRemoteAlly(classId, player)
-                    try { sendChatMessage("DM", "$player has joined the party.") } catch (_: Exception) {}
-                    Toast.makeText(this, "$player joined the table.", Toast.LENGTH_SHORT).show()
-                }
-            }
+            "join" -> admitPlayer(player, classId)
             "attack" -> {
                 doAttack(target)
                 animateAttack(true)
@@ -586,13 +630,12 @@ class MainActivity : AppCompatActivity() {
                     }
                     label.startsWith("Host") -> {
                         if (!firebaseReady()) {
-                            // Don't reopen the menu underneath — wait for OK
                             showFirebaseRequiredDialog { showStartDialog() }
                             return@setItems
                         }
-                        askHeroName(hint = "DM / host name") { name ->
+                        askHeroName(hint = "Your DM name") { name ->
                             localPlayerName = name
-                            showClassSelection(mode = "host")
+                            startHostingAsDm()
                         }
                     }
                     label.startsWith("Join") -> {
@@ -628,10 +671,42 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun startHostingAsDm() {
+        if (!nativeReady) {
+            Toast.makeText(this, "Native library not ready.", Toast.LENGTH_LONG).show()
+            showStartDialog()
+            return
+        }
+        try {
+            startDmSession(localPlayerName)
+            setHost(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "startDmSession failed", e)
+            Toast.makeText(this, "Could not open DM table.", Toast.LENGTH_LONG).show()
+            showStartDialog()
+            return
+        }
+        sessionActive = true
+        btnReset.visibility = View.GONE
+        val sidNow = try { getSessionId() } catch (_: Exception) { "" }
+        setupMultiplayer(sidNow, asHost = true)
+        if (!isOnlineHost || multiplayer?.isAvailable != true) {
+            Toast.makeText(this, "Could not start online session — check Firebase.", Toast.LENGTH_LONG).show()
+            isOnlineHost = false
+            multiplayer = null
+            sessionActive = false
+            showFirebaseRequiredDialog { showStartDialog() }
+            return
+        }
+        syncAndSave()
+        updateUi()
+        showSessionShareDialog()
+        showDmToolsDialog(firstOpen = true)
+    }
+
     private fun showClassSelection(mode: String, sid: String = "") {
         val classes = arrayOf("Fighter", "Wizard", "Rogue", "Cleric")
         val title = when (mode) {
-            "host" -> "DM character (you still sit at the table)"
             "join" -> "Choose your class"
             else -> "Choose your class"
         }
@@ -652,38 +727,16 @@ class MainActivity : AppCompatActivity() {
                     syncAndSave()
                     updateUi()
                 }
-                "host" -> {
-                    resetGame(which, localPlayerName)
-                    setHost(true)
-                    sessionActive = true
-                    btnReset.visibility = View.GONE
-                    val sidNow = try { getSessionId() } catch (_: Exception) { "" }
-                    setupMultiplayer(sidNow, asHost = true)
-                    if (!isOnlineHost || multiplayer?.isAvailable != true) {
-                        Toast.makeText(
-                            this,
-                            "Could not start online session — check FIREBASE_SETUP.md",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        isOnlineHost = false
-                        multiplayer = null
-                        showFirebaseRequiredDialog {
-                            sessionActive = false
-                            showStartDialog()
-                        }
-                        return@setItems
-                    }
-                    syncAndSave()
-                    updateUi()
-                    maybeOfferTutorialThenCoach()
-                    showSessionShareDialog()
-                }
                 "join" -> {
                     setHost(false)
+                    try { prepareClientJoin() } catch (e: Exception) {
+                        Log.e(TAG, "prepareClientJoin failed", e)
+                    }
                     sessionActive = true
                     btnReset.visibility = View.GONE
+                    lastBattleRoster = ""
                     setupMultiplayer(sid, asHost = false)
-                    // Ask the DM to add us to the party
+                    multiplayer?.publishLobbyJoin(localPlayerName, which)
                     multiplayer?.pushAction(
                         mapOf(
                             "type" to "join",
@@ -693,7 +746,11 @@ class MainActivity : AppCompatActivity() {
                         )
                     )
                     updateUi()
-                    Toast.makeText(this, "Joining $sid — waiting for the DM…", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this,
+                        "Joining $sid — waiting for the DM to admit you…",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }.setNegativeButton("Back") { _, _ -> showStartDialog() }.show()
@@ -711,6 +768,53 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+
+    private fun showDmToolsDialog(firstOpen: Boolean = false) {
+        val options = arrayOf(
+            "Begin dungeon (when heroes joined)",
+            "Advance to next room",
+            "Narrate / set scene",
+            "Grant short rest",
+            "Show session ID again",
+            "Close"
+        )
+        val title = if (firstOpen) "DM tools — you control the story" else "DM tools"
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        dmBeginDungeon(); syncAndSave(); updateUi()
+                        Toast.makeText(this, "Dungeon begun.", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
+                        dmAdvanceRoom(); syncAndSave(); updateUi()
+                    }
+                    2 -> {
+                        val input = EditText(this).apply { hint = "What do the heroes see?" }
+                        AlertDialog.Builder(this)
+                            .setTitle("Narrate")
+                            .setView(input)
+                            .setPositiveButton("Speak") { _, _ ->
+                                val line = input.text.toString().trim()
+                                if (line.isNotEmpty()) {
+                                    dmNarrate(line)
+                                    syncAndSave()
+                                    updateUi()
+                                }
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                    3 -> {
+                        dmGrantShortRest(); syncAndSave(); updateUi()
+                    }
+                    4 -> showSessionShareDialog()
+                }
+            }
+            .show()
+    }
+
     private fun showSessionShareDialog() {
         val sid = onlineSessionId.ifBlank {
             try { getSessionId() } catch (_: Exception) { "" }
@@ -722,8 +826,9 @@ class MainActivity : AppCompatActivity() {
             .setTitle("You are the DM")
             .setMessage(
                 "Session ID:\n\n$sid\n\n" +
-                    "Share this code with friends. They tap Join session and enter it.\n\n" +
-                    "You control the world (enemy turns & saves). Their actions are sent to you.\n\n" +
+                    "You are the DM — not a hero on the battle map.\n" +
+                    "Friends: Join session, enter this ID, pick a class.\n" +
+                    "Use the DM button for Begin dungeon / Advance / Narrate.\n\n" +
                     "(Copied to clipboard.)"
             )
             .setPositiveButton("Got it", null)
@@ -826,10 +931,10 @@ class MainActivity : AppCompatActivity() {
         val myTurnBanner = whose.equals(localPlayerName, ignoreCase = true) ||
             whose.equals("You", ignoreCase = true)
         turnBanner.text = when {
-            isOnlineHost && isShop -> "DM · merchant"
             isOnlineHost && status.contains("Game Over", ignoreCase = true) -> "DM · defeat…"
-            isOnlineHost && myTurnBanner -> "DM · your move"
-            isOnlineHost -> "DM · $whose"
+            isOnlineHost && status.contains("waiting for players", ignoreCase = true) -> "DM · waiting for heroes"
+            isOnlineHost -> "DM · directing the table"
+            isOnlineClient && remoteDmName.isNotBlank() -> "DM: $remoteDmName · $whose"
             isShop -> "Safe haven — merchant"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
             myTurnBanner -> "Your move, $localPlayerName"
@@ -850,6 +955,19 @@ class MainActivity : AppCompatActivity() {
         btnRest.text = if (isShop) "Leave" else "🌙\nRest"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
 
+        val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (dmTable) {
+            btnSheet.text = "DM"
+            turnBanner.text = when {
+                status.contains("Game Over", ignoreCase = true) -> "DM · defeat…"
+                getBattleRoster().substringBefore('|').isBlank() -> "DM · waiting for heroes to Join"
+                else -> "DM · tap DM for story tools"
+            }
+        } else if (isOnlineClient && remoteDmName.isNotBlank()) {
+            btnSheet.text = "Sheet"
+        }
+
+
         val isGameOver = status.contains("Game Over", ignoreCase = true)
         val localDown = status.lineSequence().any {
             it.contains(localPlayerName) && it.contains("[DOWN]", ignoreCase = true)
@@ -858,11 +976,20 @@ class MainActivity : AppCompatActivity() {
             isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
         )
 
-        btnAttack.isEnabled = isMyTurn
-        btnSpecial.isEnabled = isMyTurn
-        btnHeal.isEnabled = isMyTurn
-        btnRest.isEnabled = isMyTurn
-        btnInteract.isEnabled = isMyTurn || (isShop && !isGameOver)
+        val dmTableLock = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (dmTableLock) {
+            btnAttack.isEnabled = false
+            btnSpecial.isEnabled = false
+            btnHeal.isEnabled = false
+            btnRest.isEnabled = false
+            btnInteract.isEnabled = false
+        } else {
+            btnAttack.isEnabled = isMyTurn
+            btnSpecial.isEnabled = isMyTurn
+            btnHeal.isEnabled = isMyTurn
+            btnRest.isEnabled = isMyTurn
+            btnInteract.isEnabled = isMyTurn || (isShop && !isGameOver)
+        }
 
         val roomDesc = getRoomDescription()
         if (roomDesc != lastRoomDesc) {
