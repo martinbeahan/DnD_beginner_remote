@@ -1,8 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    // Uncomment ONLY after you add app/google-services.json from the Firebase console:
-    // alias(libs.plugins.google.services)
+    // Enabled for online Host/Join (requires app/google-services.json locally)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -16,7 +16,7 @@ android {
         applicationId = "com.fintrack.dndbeginnerremote"
         minSdk = 30
         targetSdk = 35
-        versionCode = 13
+        versionCode = 14
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
