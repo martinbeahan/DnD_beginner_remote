@@ -8,6 +8,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -59,6 +60,22 @@ class MainActivity : AppCompatActivity() {
     private var diceDamage: TextView? = null
     private var diceSummary: TextView? = null
     private var diceHideRunnable: Runnable? = null
+    private lateinit var mainMenuRoot: View
+    private lateinit var btnMenuContinue: Button
+    private lateinit var btnMenuSolo: Button
+    private lateinit var btnMenuHost: Button
+    private lateinit var btnMenuJoin: Button
+    private lateinit var btnMenuSettings: Button
+    private lateinit var btnMenuQuit: Button
+    private lateinit var mainMenuSubtitle: TextView
+    private lateinit var settingsRoot: View
+    private lateinit var chkBeginnerTips: CheckBox
+    private lateinit var chkSound: CheckBox
+    private lateinit var btnSettingsTutorial: Button
+    private lateinit var btnSettingsAbandon: Button
+    private lateinit var btnSettingsClose: Button
+    private lateinit var settingsAboutText: TextView
+    private var soundEnabled = false
     private val handler = Handler(Looper.getMainLooper())
     private var uiLoopStarted = false
     private val uiTick = object : Runnable {
@@ -185,6 +202,7 @@ class MainActivity : AppCompatActivity() {
         partyColumn = findViewById(R.id.partyColumn)
         enemyColumn = findViewById(R.id.enemyColumn)
         wireDiceOverlay()
+        wireMainMenuAndSettings()
 
         btnAttack.setOnClickListener { 
             Log.d(TAG, "Attack clicked")
@@ -250,6 +268,7 @@ class MainActivity : AppCompatActivity() {
         btnJournal.setOnClickListener { showJournal() }
         btnHelp.setOnClickListener { showHelpMenu() }
         btnReset.setOnClickListener { resetToStartMenu() }
+        btnReset.text = "Menu"
 
         findViewById<View>(R.id.topBar).setOnLongClickListener {
             val sid = getSessionId()
@@ -260,6 +279,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         soloCoachEnabled = prefs().getBoolean("solo_coach_enabled", true)
+        soundEnabled = prefs().getBoolean("sound_enabled", false)
 
         // Only wipe when a prior *active* session exited uncleanly (crash_guard left true).
         // Do NOT arm crash_guard merely because the start dialog is shown.
@@ -332,6 +352,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun activateSession() {
         sessionActive = true
+        hideMainMenu()
+        hideSettingsOverlay()
         // Arm crash guard only while a real session is running.
         prefs().edit().putBoolean("crash_guard", true).apply()
     }
@@ -739,6 +761,7 @@ class MainActivity : AppCompatActivity() {
     private fun continueSavedGame() {
         if (!nativeReady) {
             Toast.makeText(this, "Native library not ready — can't load save.", Toast.LENGTH_LONG).show()
+            showStartDialog()
             return
         }
         detachOnlineSession()
@@ -837,12 +860,26 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showStartDialog() {
-        Log.d(TAG, "Showing start dialog")
+        Log.d(TAG, "Showing main menu")
         // Mode switch / Reset: drop any live Firebase listeners first.
         sessionActive = false
         detachOnlineSession()
+        hideSettingsOverlay()
+        refreshMainMenuButtons()
+        mainMenuRoot.visibility = View.VISIBLE
+        mainMenuRoot.bringToFront()
+        btnReset.visibility = View.GONE
+    }
+
+    private fun hideMainMenu() {
+        if (::mainMenuRoot.isInitialized) {
+            mainMenuRoot.visibility = View.GONE
+        }
+    }
+
+    private fun refreshMainMenuButtons() {
+        if (!::btnMenuContinue.isInitialized) return
         val saved = livableSavedState()
-        val modes = mutableListOf<String>()
         if (saved != null) {
             val wasHost = prefs().getBoolean("was_online_host", false)
             val wasClient = prefs().getBoolean("was_online_client", false)
@@ -852,46 +889,143 @@ class MainActivity : AppCompatActivity() {
                 wasClient && sid.isNotBlank() -> "Join $sid"
                 else -> "solo"
             }
-            modes += "Continue ($tag) — ${heroNameFromSave(saved)}"
+            btnMenuContinue.visibility = View.VISIBLE
+            btnMenuContinue.text = "Continue ($tag) — ${heroNameFromSave(saved)}"
+            mainMenuSubtitle.text = "Welcome back, adventurer"
+        } else {
+            btnMenuContinue.visibility = View.GONE
+            mainMenuSubtitle.text = "Choose your path"
         }
-        modes += "Solo adventure"
-        modes += "Host online (you are the DM)"
-        modes += "Join session"
+    }
 
-        AlertDialog.Builder(this)
-            .setTitle("D&D Beginner")
-            .setCancelable(false)
-            .setItems(modes.toTypedArray()) { _, which ->
-                val label = modes[which]
-                when {
-                    label.startsWith("Continue") -> continueSavedGame()
-                    label.startsWith("Solo") -> askHeroName { name ->
-                        localPlayerName = name
-                        showClassSelection(mode = "solo")
-                    }
-                    label.startsWith("Host") -> {
-                        if (!firebaseReady()) {
-                            showFirebaseRequiredDialog { showStartDialog() }
-                            return@setItems
-                        }
-                        askHeroName(hint = "Your DM name") { name ->
-                            localPlayerName = name
-                            startHostingAsDm()
-                        }
-                    }
-                    label.startsWith("Join") -> {
-                        if (!firebaseReady()) {
-                            showFirebaseRequiredDialog { showStartDialog() }
-                            return@setItems
-                        }
-                        askHeroName { name ->
-                            localPlayerName = name
-                            showJoinDialog()
-                        }
-                    }
-                }
+    private fun wireMainMenuAndSettings() {
+        mainMenuRoot = findViewById(R.id.mainMenuRoot)
+        btnMenuContinue = findViewById(R.id.btnMenuContinue)
+        btnMenuSolo = findViewById(R.id.btnMenuSolo)
+        btnMenuHost = findViewById(R.id.btnMenuHost)
+        btnMenuJoin = findViewById(R.id.btnMenuJoin)
+        btnMenuSettings = findViewById(R.id.btnMenuSettings)
+        btnMenuQuit = findViewById(R.id.btnMenuQuit)
+        mainMenuSubtitle = findViewById(R.id.mainMenuSubtitle)
+
+        settingsRoot = findViewById(R.id.settingsRoot)
+        chkBeginnerTips = findViewById(R.id.chkBeginnerTips)
+        chkSound = findViewById(R.id.chkSound)
+        btnSettingsTutorial = findViewById(R.id.btnSettingsTutorial)
+        btnSettingsAbandon = findViewById(R.id.btnSettingsAbandon)
+        btnSettingsClose = findViewById(R.id.btnSettingsClose)
+        settingsAboutText = findViewById(R.id.settingsAboutText)
+
+        btnMenuContinue.setOnClickListener {
+            // Menu stays until continueSavedGame succeeds (activateSession) or
+            // failure paths re-show via showStartDialog().
+            continueSavedGame()
+        }
+        btnMenuSolo.setOnClickListener {
+            askHeroName { name ->
+                localPlayerName = name
+                showClassSelection(mode = "solo")
             }
+        }
+        btnMenuHost.setOnClickListener {
+            if (!firebaseReady()) {
+                showFirebaseRequiredDialog { showStartDialog() }
+                return@setOnClickListener
+            }
+            askHeroName(hint = "Your DM name") { name ->
+                localPlayerName = name
+                startHostingAsDm()
+            }
+        }
+        btnMenuJoin.setOnClickListener {
+            if (!firebaseReady()) {
+                showFirebaseRequiredDialog { showStartDialog() }
+                return@setOnClickListener
+            }
+            askHeroName { name ->
+                localPlayerName = name
+                showJoinDialog()
+            }
+        }
+        btnMenuSettings.setOnClickListener { showSettingsOverlay() }
+        btnMenuQuit.setOnClickListener { moveTaskToBack(true) }
+
+        chkBeginnerTips.setOnCheckedChangeListener { _, checked ->
+            soloCoachEnabled = checked
+            prefs().edit().putBoolean("solo_coach_enabled", checked).apply()
+        }
+        chkSound.setOnCheckedChangeListener { _, checked ->
+            soundEnabled = checked
+            prefs().edit().putBoolean("sound_enabled", checked).apply()
+            // No audio engine yet — preference is persisted for a future pass.
+        }
+        btnSettingsTutorial.setOnClickListener {
+            hideSettingsOverlay()
+            showTutorial(0) {}
+        }
+        btnSettingsAbandon.setOnClickListener { confirmAbandonAdventure() }
+        btnSettingsClose.setOnClickListener { hideSettingsOverlay() }
+    }
+
+    private fun showSettingsOverlay() {
+        if (!::settingsRoot.isInitialized) return
+        chkBeginnerTips.setOnCheckedChangeListener(null)
+        chkSound.setOnCheckedChangeListener(null)
+        chkBeginnerTips.isChecked = soloCoachEnabled
+        chkSound.isChecked = soundEnabled
+        chkBeginnerTips.setOnCheckedChangeListener { _, checked ->
+            soloCoachEnabled = checked
+            prefs().edit().putBoolean("solo_coach_enabled", checked).apply()
+        }
+        chkSound.setOnCheckedChangeListener { _, checked ->
+            soundEnabled = checked
+            prefs().edit().putBoolean("sound_enabled", checked).apply()
+        }
+        btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
+        val verCode = try {
+            packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+        } catch (_: Exception) {
+            18
+        }
+        val verName = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2"
+        } catch (_: Exception) {
+            "1.2"
+        }
+        settingsAboutText.text =
+            getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")"
+        settingsRoot.visibility = View.VISIBLE
+        settingsRoot.bringToFront()
+    }
+
+    private fun hideSettingsOverlay() {
+        if (::settingsRoot.isInitialized) {
+            settingsRoot.visibility = View.GONE
+        }
+    }
+
+    private fun confirmAbandonAdventure() {
+        AlertDialog.Builder(this)
+            .setTitle("Leave adventure?")
+            .setMessage("This clears your current session flags and save, then returns to the main menu.")
+            .setPositiveButton("Abandon") { _, _ -> abandonAdventure() }
+            .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun abandonAdventure() {
+        hideSettingsOverlay()
+        sessionActive = false
+        detachOnlineSession()
+        prefs().edit()
+            .remove("save_state")
+            .putBoolean("crash_guard", false)
+            .remove("was_online_host")
+            .remove("was_online_client")
+            .remove("online_session_id")
+            .apply()
+        Toast.makeText(this, "Adventure abandoned.", Toast.LENGTH_SHORT).show()
+        showStartDialog()
     }
 
     private fun askHeroName(hint: String = "Your hero name", onName: (String) -> Unit) {
@@ -1831,7 +1965,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHelpMenu() {
-        val options = arrayOf("Show beginner tutorial", "Action quick reference", "Toggle solo DM tips")
+        val options = arrayOf(
+            "Show beginner tutorial",
+            "Action quick reference",
+            "Toggle solo DM tips",
+            "Settings…"
+        )
         AlertDialog.Builder(this)
             .setTitle("Help")
             .setItems(options) { _, which ->
@@ -1848,6 +1987,7 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Solo DM tips: $state", Toast.LENGTH_SHORT).show()
                         prefs().edit().putBoolean("solo_coach_enabled", soloCoachEnabled).apply()
                     }
+                    3 -> showSettingsOverlay()
                 }
             }
             .setNegativeButton("Close", null)
