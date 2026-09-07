@@ -28,7 +28,7 @@ When **DM voice** is enabled in Settings (default **off**), notable `[DM]:` narr
 We intentionally avoid Mixkit Music, FreePD, and any D&D / Wizards of the Coast / Critical Role / film / commercial game OST material.
 
 
-## 2D graphics pack (v1.6)
+## 2D graphics pack (v1.6 + layer 2 / v1.9)
 
 All bundled battle art ships under **Creative Commons Zero (CC0 / public domain)** or is original UI chrome (XML shapes). No Wizards of the Coast / D&D product art is used.
 
@@ -58,6 +58,23 @@ Idle frames extracted from free CC0 packs, padded to 256×256 PNGs for Android d
 | `bg_battle_vault.webp` | Phantasy Dungeon Entrance (skull layer) | ansimuz | CC0 1.0 | https://opengameart.org/content/phantasy-dungeon-entrance |
 
 Runtime wiring picks road / woods / crypt / vault / dungeon stage chrome from Solo quest beat names (and room text heuristics). HUD parchment, HP bars, and dice panel strokes are original XML drawables.
+
+### Graphics layer 2 (v1.9)
+
+Expanded Act 2 / crawl stage chrome and combat feedback. Still **CC0 / original UI only** — no WotC art.
+
+| Asset in app | Source | Author | License | Link |
+|---|---|---|---|---|
+| `bg_battle_weir.webp` | Backgrounds (battleback10) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_hall.webp` | Backgrounds (battleback7) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_loft.webp` | Backgrounds (battleback9) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_cave.webp` | Backgrounds (battleback2) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_ruins.webp` | Backgrounds (battleback3) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_battle_flooded.webp` | battleback8 + blue wash (Flooded Cellar) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `bg_menu_backdrop.webp` | Backgrounds (battleback5, dimmed) | Nidhoggn | CC0 1.0 | https://opengameart.org/content/backgrounds-3 |
+| `sprite_*_atk.png` | Attack sheet mid-frames (same LuizMelo CC0 packs as idle) | LuizMelo | CC0 1.0 | itch.io packs listed above |
+
+Layered stage XML adds a cheap top/bottom shade (pseudo-depth) over the battlebacks. Portrait frames, menu/settings panels, screen flash, and floating damage numbers are original UI chrome.
 
 ### Not used
 

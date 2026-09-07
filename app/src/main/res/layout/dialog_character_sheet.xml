@@ -19,8 +19,10 @@
 
             <ImageView
                 android:id="@+id/sheetPortrait"
-                android:layout_width="72dp"
-                android:layout_height="72dp"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:padding="6dp"
+                android:background="@drawable/bg_portrait_frame"
                 android:contentDescription="Portrait"
                 android:scaleType="fitCenter" />
 
