@@ -298,7 +298,7 @@ bool Game::trySoloQuestSearch(Character* hero) {
 
     if (beat == SoloQuestBeat::MILLHOLLOW) {
         hero->gold += 8;
-        lastEvent_ = hero->name + " finds a soot-stained note: "Hollowbarrow Crypt. Bring no open flame — the Ashen Lantern alone."";
+        lastEvent_ = hero->name + " finds a soot-stained note: \"Hollowbarrow Crypt. Bring no open flame — the Ashen Lantern alone.\"";
         dmSay("A villager's scrap points to Hollowbarrow Crypt. The Ashen Lantern must burn there — or return to the green.");
         addJournalEntry("Clue: Hollowbarrow Crypt holds the Ashen Lantern; open flame is unwelcome.");
         addChatMessage("Search", lastEvent_);
