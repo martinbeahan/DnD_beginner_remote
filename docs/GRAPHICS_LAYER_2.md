@@ -15,4 +15,4 @@ Companion controls, difficulty, story/crawl, audio, tap-to-target.
 
 ## Out of scope
 
-Level-up UX overhaul (queued after this PR). 3D / engine rewrite.
+Level-up UX overhaul → see `LEVELUP_UX.md` (v2.0). 3D / engine rewrite.
