@@ -19,7 +19,8 @@ Game::Game() : currentTurnIndex_(0), turnCounter_(0), roomCount_(0), gameOver_(f
 }
 
 void Game::startNewGame(CharacterClass selectedClass, const std::string& playerName,
-                        int soloPlayMode, int difficulty) {
+                        int soloPlayMode, int difficulty,
+                        CharacterClass companionClass, bool companionAutoAi) {
     turnOrder_.clear();
     players_.clear();
     enemies_.clear();
@@ -50,7 +51,16 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     questAct2LedgerFound_ = false;
 
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
-    addAlly("Melf (NPC)", CharacterClass::WIZARD);
+    players_.back()->aiControlled = false;
+    {
+        CharacterClass cc = companionClass;
+        if (static_cast<int>(cc) < 0 || static_cast<int>(cc) > 3) cc = CharacterClass::WIZARD;
+        addAlly(companionNameForClass(cc), cc);
+        if (!players_.empty()) {
+            Character* ally = findNpcCompanion();
+            if (ally) ally->aiControlled = companionAutoAi;
+        }
+    }
 
     if (soloPlayMode_ == static_cast<int>(SoloPlayMode::CRAWL)) {
         // Dungeon Crawl: skip quest script — classic procedural rooms from the start.
@@ -82,7 +92,11 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
                    std::string(difficultyName(difficulty_)) + ").");
     dmSay("Welcome, adventurers. I am your Dungeon Master.");
     dmSay("Use Attack for a weapon strike, your class Special for a signature move, Potion for healing, Search once per clear chamber, and Short Rest when safe.");
-    dmSay("You carry an extra supply for this quest — drink a Potion when bloodied; Melf will help when you are low.");
+    {
+        Character* ally = findNpcCompanion();
+        const std::string allyName = ally ? ally->name : std::string("your companion");
+        dmSay("You carry an extra supply for this quest — drink a Potion when bloodied; " + allyName + " will help when you are low.");
+    }
 }
 
 void Game::applyStarterPaddingForStory() {
@@ -219,7 +233,103 @@ void Game::addAlly(const std::string& name, CharacterClass cl) {
     }
     std::string uid = "ally-" + std::to_string(players_.size());
     players_.push_back(std::make_unique<Character>(name, cl, uid));
+    // Solo NPC companions default to AI; joined humans (no "(NPC)") wait for their own input.
+    players_.back()->aiControlled = (name.find("(NPC)") != std::string::npos);
     rebuildTurnOrder();
+}
+
+std::string Game::companionNameForClass(CharacterClass cl) {
+    switch (cl) {
+        case CharacterClass::FIGHTER: return "Bren (NPC)";
+        case CharacterClass::WIZARD: return "Melf (NPC)";
+        case CharacterClass::ROGUE: return "Sable (NPC)";
+        case CharacterClass::CLERIC: return "Miren (NPC)";
+    }
+    return "Melf (NPC)";
+}
+
+Character* Game::findNpcCompanion() const {
+    for (const auto& p : players_) {
+        if (p && p->name.find("(NPC)") != std::string::npos) return p.get();
+    }
+    return nullptr;
+}
+
+std::string Game::getCompanionName() const {
+    Character* c = findNpcCompanion();
+    return c ? c->name : "";
+}
+
+bool Game::isCompanionAutoAi() const {
+    Character* c = findNpcCompanion();
+    if (!c) return true;
+    return c->aiControlled;
+}
+
+void Game::setCompanionAutoAi(bool autoAi) {
+    Character* c = findNpcCompanion();
+    if (!c) return;
+    c->aiControlled = autoAi;
+    lastEvent_ = c->name + (autoAi ? " will act automatically." : " awaits your commands on their turn.");
+    dmSay(lastEvent_);
+    addChatMessage("System", lastEvent_);
+}
+
+bool Game::setCompanionClass(CharacterClass cl) {
+    if (gameOver_ || isInCombat()) return false;
+    Character* old = findNpcCompanion();
+    if (!old) return false;
+    if (static_cast<int>(cl) < 0 || static_cast<int>(cl) > 3) return false;
+    if (old->characterClass == cl) {
+        // Still refresh name if needed
+        std::string want = companionNameForClass(cl);
+        if (old->name != want) old->name = want;
+        return true;
+    }
+    const int level = old->level;
+    const int xp = old->xp;
+    const int gold = old->gold;
+    const int pending = old->pendingStatPoints;
+    const int initiative = old->initiative;
+    const bool ai = old->aiControlled;
+    const bool down = old->isDowned;
+    const bool dead = old->isDead;
+    const bool stable = old->isStable;
+    const int dss = old->deathSaveSuccesses;
+    const int dsf = old->deathSaveFailures;
+    const std::string uid = old->uid;
+    const std::string newName = companionNameForClass(cl);
+
+    for (auto& p : players_) {
+        if (p.get() != old) continue;
+        auto neu = std::make_unique<Character>(newName, cl, uid);
+        neu->level = level;
+        neu->xp = xp;
+        neu->gold = gold;
+        neu->pendingStatPoints = pending;
+        neu->initiative = initiative;
+        neu->aiControlled = ai;
+        neu->applyStatsForLevel();
+        neu->currentHp = neu->maxHp;
+        neu->resources = neu->maxResources;
+        neu->isDowned = down;
+        neu->isDead = dead;
+        neu->isStable = stable;
+        neu->deathSaveSuccesses = dss;
+        neu->deathSaveFailures = dsf;
+        if (dead || down) neu->currentHp = 0;
+        // Story padding: if hero had padding, companion already got it at start via applyStarterPaddingForStory on all.
+        p = std::move(neu);
+        break;
+    }
+    rebuildTurnOrder();
+    lastEvent_ = newName + " takes the field as a " +
+        (cl == CharacterClass::FIGHTER ? "Fighter" :
+         cl == CharacterClass::WIZARD ? "Wizard" :
+         cl == CharacterClass::ROGUE ? "Rogue" : "Cleric") + ".";
+    dmSay(lastEvent_);
+    addChatMessage("System", lastEvent_);
+    return true;
 }
 
 void Game::resetSoloQuestState() {
@@ -322,7 +432,11 @@ void Game::spawnSoloQuestEnemies() {
         case SoloQuestBeat::LANTERN_VAULT:
             // Climax retained: one Champion, HP/AC one notch down, single surge max.
             makeFoe("Skeleton Champion", CharacterClass::FIGHTER, 12, 1, /*resourceCap=*/1, /*attackStatDelta=*/-2);
-            dmSay("The vault guardian stirs — a Skeleton Champion. It can surge once; keep a Potion ready and let Melf help.");
+            {
+                Character* ally = findNpcCompanion();
+                std::string who = ally ? ally->name : "your companion";
+                dmSay("The vault guardian stirs — a Skeleton Champion. It can surge once; keep a Potion ready and let " + who + " help.");
+            }
             break;
         case SoloQuestBeat::RESOLUTION:
             // Shrine: no fight — resolution beat.
@@ -344,7 +458,11 @@ void Game::spawnSoloQuestEnemies() {
             break;
         case SoloQuestBeat::ACT2_HALL:
             makeFoe("The Collector", CharacterClass::FIGHTER, 14, 1, /*resourceCap=*/1, /*attackStatDelta=*/-1);
-            dmSay("The Collector wears a false mill seal. Keep a Potion ready — Melf will help.");
+            {
+                Character* ally = findNpcCompanion();
+                std::string who = ally ? ally->name : "your companion";
+                dmSay("The Collector wears a false mill seal. Keep a Potion ready — " + who + " will help.");
+            }
             break;
         case SoloQuestBeat::ACT2_SETTLED:
             break;
@@ -746,8 +864,8 @@ bool Game::recoverFromPartyWipe() {
 
 bool Game::isAllyAi(const Character* c) const {
     if (!c) return false;
-    // Only explicit NPC companions are AI. Joined humans (even with ally- uids) wait for input.
-    return c->name.find("(NPC)") != std::string::npos;
+    // Player-controlled companions (and joined humans) wait for UI input.
+    return c->aiControlled;
 }
 
 void Game::grantKillLoot(Character* actor, const std::string& foeName) {
@@ -1604,6 +1722,10 @@ std::string Game::getPartyStatus() const {
     ss << "Difficulty: " << difficultyName(difficulty_) << "\n";
     if (gameOver_) ss << "Game Over\n";
     if (dmOnlyTable_ && !dmName_.empty()) ss << "DM: " << dmName_ << "\n";
+    if (Character* companion = findNpcCompanion()) {
+        ss << "Companion: " << companion->name
+           << (companion->aiControlled ? " [Auto]" : " [Player]") << "\n";
+    }
     for (const auto& p : players_) {
         ss << p->name << " | HP: " << p->currentHp << "/" << p->maxHp;
         if (p->isDead) ss << " [DEAD]";
@@ -1663,7 +1785,8 @@ std::string Game::serialize() {
         ss << ",";
         if (p->equippedArmor) ss << p->equippedArmor->name << ":" << p->equippedArmor->bonus << ":A"; else ss << "None:0:A";
         ss << "," << (p->isDowned ? 1 : 0) << "," << p->deathSaveSuccesses << "," << p->deathSaveFailures
-           << "," << (p->isStable ? 1 : 0) << "," << (p->isDead ? 1 : 0);
+           << "," << (p->isStable ? 1 : 0) << "," << (p->isDead ? 1 : 0)
+           << "," << (p->aiControlled ? 1 : 0);
         ss << ";";
     }
     ss << "|";
@@ -1805,8 +1928,16 @@ void Game::deserialize(const std::string& data) {
                 if (std::getline(ss_p, dsf_s, ',')) p->deathSaveFailures = std::stoi(dsf_s);
                 if (std::getline(ss_p, stab_s, ',')) p->isStable = (stab_s == "1");
                 if (std::getline(ss_p, dead_s, ',')) p->isDead = (dead_s == "1");
+                std::string ai_s;
+                if (std::getline(ss_p, ai_s, ',')) {
+                    p->aiControlled = (ai_s == "1");
+                } else {
+                    // Legacy saves: NPC-named allies were always AI-controlled.
+                    p->aiControlled = (p->name.find("(NPC)") != std::string::npos);
+                }
             } else {
                 p->isDowned = (p->currentHp <= 0);
+                p->aiControlled = (p->name.find("(NPC)") != std::string::npos);
             }
             if (p->isDead) {
                 p->isDowned = true;

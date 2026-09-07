@@ -253,12 +253,38 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_processGameTurn(JNIEnv *env, jo
 }
 
 JNIEXPORT void JNICALL
-Java_com_fintrack_dndbeginnerremote_MainActivity_resetGame(JNIEnv *env, jobject thiz, jint characterClass, jstring playerName, jint soloPlayMode, jint difficulty) {
+Java_com_fintrack_dndbeginnerremote_MainActivity_resetGame(JNIEnv *env, jobject thiz, jint characterClass, jstring playerName, jint soloPlayMode, jint difficulty, jint companionClass, jboolean companionAutoAi) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
     g_Game.startNewGame(static_cast<dnd::CharacterClass>(characterClass), nativeName ? nativeName : "Hero",
-                        static_cast<int>(soloPlayMode), static_cast<int>(difficulty));
+                        static_cast<int>(soloPlayMode), static_cast<int>(difficulty),
+                        static_cast<dnd::CharacterClass>(companionClass),
+                        companionAutoAi == JNI_TRUE);
     env->ReleaseStringUTFChars(playerName, nativeName);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getCompanionName(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return env->NewStringUTF(g_Game.getCompanionName().c_str());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_isCompanionAutoAi(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.isCompanionAutoAi() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_setCompanionAutoAi(JNIEnv *env, jobject thiz, jboolean autoAi) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.setCompanionAutoAi(autoAi == JNI_TRUE);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_setCompanionClass(JNIEnv *env, jobject thiz, jint characterClass) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.setCompanionClass(static_cast<dnd::CharacterClass>(characterClass)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
