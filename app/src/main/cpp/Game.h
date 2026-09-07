@@ -29,9 +29,18 @@ public:
     Game();
     void startNewGame(CharacterClass selectedClass = CharacterClass::FIGHTER, const std::string& playerName = "Hero",
                       int soloPlayMode = static_cast<int>(SoloPlayMode::STORY),
-                      int difficulty = static_cast<int>(Difficulty::EASY));
+                      int difficulty = static_cast<int>(Difficulty::EASY),
+                      CharacterClass companionClass = CharacterClass::WIZARD,
+                      bool companionAutoAi = true);
     void startDmSession(const std::string& dmName);
     void addAlly(const std::string& name, CharacterClass cl);
+    /** Solo NPC companion helpers (host/solo). Empty name if none. */
+    std::string getCompanionName() const;
+    bool isCompanionAutoAi() const;
+    void setCompanionAutoAi(bool autoAi);
+    /** Reclass NPC companion when not in combat; returns false if unavailable. */
+    bool setCompanionClass(CharacterClass cl);
+    static std::string companionNameForClass(CharacterClass cl);
     void dmBeginDungeon();
     void dmAdvanceRoom();
     void dmNarrate(const std::string& line);
@@ -168,6 +177,7 @@ private:
     void enemyTurn();
     void allyTurn();
     bool isAllyAi(const Character* c) const;
+    Character* findNpcCompanion() const;
     // Lightweight combat AI helpers (solo + host-side only).
     int scoreHeroThreat(const Character& hero, bool partyHasDowned) const;
     int pickEnemyAiTarget() const;

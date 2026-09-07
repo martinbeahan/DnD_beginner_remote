@@ -79,6 +79,8 @@ struct Character {
     bool isDead = false;     // 3 death-save failures: out of the fight (not party Game Over alone)
     int deathSaveSuccesses = 0;
     int deathSaveFailures = 0;
+    /** Solo NPC companion: true = existing ally AI; false = human chooses actions on their turn. */
+    bool aiControlled = false;
 
     std::shared_ptr<Item> equippedWeapon;
     std::shared_ptr<Item> equippedArmor;

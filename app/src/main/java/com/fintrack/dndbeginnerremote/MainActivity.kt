@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRest: Button
     private lateinit var btnReset: Button
     private lateinit var btnSheet: Button
+    private lateinit var btnCompanion: Button
     private lateinit var btnJournal: Button
     private lateinit var btnHelp: Button
     private lateinit var btnInGameSettings: Button
@@ -174,7 +175,18 @@ class MainActivity : AppCompatActivity() {
     external fun addRemoteAlly(characterClass: Int, playerName: String)
     external fun sendChatMessage(sender: String, message: String)
     external fun processGameTurn()
-    external fun resetGame(characterClass: Int, playerName: String, soloPlayMode: Int, difficulty: Int)
+    external fun resetGame(
+        characterClass: Int,
+        playerName: String,
+        soloPlayMode: Int,
+        difficulty: Int,
+        companionClass: Int,
+        companionAutoAi: Boolean
+    )
+    external fun getCompanionName(): String
+    external fun isCompanionAutoAi(): Boolean
+    external fun setCompanionAutoAi(autoAi: Boolean)
+    external fun setCompanionClass(characterClass: Int): Boolean
     external fun setDifficulty(difficulty: Int)
     external fun getDifficulty(): Int
     external fun getSoloPlayMode(): Int
@@ -223,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         btnRest = findViewById(R.id.btnRest)
         btnReset = findViewById(R.id.btnReset)
         btnSheet = findViewById(R.id.btnSheet)
+        btnCompanion = findViewById(R.id.btnCompanion)
         btnJournal = findViewById(R.id.btnJournal)
         btnHelp = findViewById(R.id.btnHelp)
         btnInGameSettings = findViewById(R.id.btnInGameSettings)
@@ -310,6 +323,10 @@ class MainActivity : AppCompatActivity() {
         btnSheet.setOnClickListener {
             if (isOnlineHost && (try { isDmTable() } catch (_: Exception) { true })) showDmToolsDialog()
             else showCharacterSheet()
+        }
+        btnCompanion.setOnClickListener {
+            try { gameAudio?.playUiClick() } catch (_: Exception) {}
+            showCompanionSheet()
         }
         btnJournal.setOnClickListener { showJournal() }
         btnHelp.setOnClickListener { showHelpMenu() }
@@ -467,9 +484,11 @@ class MainActivity : AppCompatActivity() {
                     it.contains("[STABLE]", ignoreCase = true)
                 )
             }
+            val companionTurn = isCompanionPlayerTurn()
             // Downed/dead heroes never attack/search/heal; party Rest/Onward after a clear may continue.
+            // Player-controlled companion turns still allow Attack/Special/Potion.
             val clearedNow = try { isRoomCleared() } catch (_: Exception) { false }
-            if (localDown) {
+            if (localDown && !companionTurn) {
                 val partyContinue = clearedNow && actionType in setOf("rest", "advance")
                 if (!partyContinue && actionType in setOf("attack", "special", "heal", "interact", "rest", "advance")) {
                     Toast.makeText(this, "You're down — wait for a heal or Game Over.", Toast.LENGTH_SHORT).show()
@@ -1309,20 +1328,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Class $which selected. mode=$mode")
             localClassId = which
             when (mode) {
-                "solo", "crawl" -> {
-                    detachOnlineSession()
-                    val playMode = if (mode == "crawl") 1 else 0
-                    runDifficulty = preferredDifficulty.coerceIn(0, 3)
-                    resetGame(which, localPlayerName, playMode, runDifficulty)
-                    setHost(true)
-                    maybeOfferTutorialThenCoach()
-                    activateSession()
-                    btnReset.visibility = View.GONE
-                    wipeDialogShowing = false
-                    prefs().edit().putInt("hero_class", which).putString("hero_name", localPlayerName).apply()
-                    syncAndSave()
-                    updateUi()
-                }
+                "solo", "crawl" -> showCompanionSetup(mode = mode, heroClass = which)
                 "join" -> {
                     detachOnlineSession()
                     setHost(false)
@@ -1357,6 +1363,65 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.setNegativeButton("Back") { _, _ -> showStartDialog() }.show()
+    }
+
+    private fun companionDisplayName(classId: Int): String = when (classId) {
+        0 -> "Bren (NPC)"
+        1 -> "Melf (NPC)"
+        2 -> "Sable (NPC)"
+        3 -> "Miren (NPC)"
+        else -> "Melf (NPC)"
+    }
+
+    private fun showCompanionSetup(mode: String, heroClass: Int) {
+        val classes = arrayOf(
+            "Fighter — Bren",
+            "Wizard — Melf",
+            "Rogue — Sable",
+            "Cleric — Miren"
+        )
+        val title = if (mode == "crawl") "Dungeon Crawl — companion class" else "Story — companion class"
+        AlertDialog.Builder(this).setTitle(title).setItems(classes) { _, companionClass ->
+            AlertDialog.Builder(this)
+                .setTitle("Companion control")
+                .setMessage(
+                    "${companionDisplayName(companionClass)} can fight automatically, or you can choose " +
+                        "Attack / Special / Potion on their turn."
+                )
+                .setPositiveButton("Auto (AI)") { _, _ ->
+                    beginSoloOrCrawl(mode, heroClass, companionClass, companionAutoAi = true)
+                }
+                .setNeutralButton("Player-controlled") { _, _ ->
+                    beginSoloOrCrawl(mode, heroClass, companionClass, companionAutoAi = false)
+                }
+                .setNegativeButton("Back") { _, _ -> showCompanionSetup(mode, heroClass) }
+                .show()
+        }.setNegativeButton("Back") { _, _ -> showClassSelection(mode) }.show()
+    }
+
+    private fun beginSoloOrCrawl(
+        mode: String,
+        heroClass: Int,
+        companionClass: Int,
+        companionAutoAi: Boolean
+    ) {
+        detachOnlineSession()
+        val playMode = if (mode == "crawl") 1 else 0
+        runDifficulty = preferredDifficulty.coerceIn(0, 3)
+        resetGame(heroClass, localPlayerName, playMode, runDifficulty, companionClass, companionAutoAi)
+        setHost(true)
+        maybeOfferTutorialThenCoach()
+        activateSession()
+        btnReset.visibility = View.GONE
+        wipeDialogShowing = false
+        prefs().edit()
+            .putInt("hero_class", heroClass)
+            .putString("hero_name", localPlayerName)
+            .putInt("companion_class", companionClass)
+            .putBoolean("companion_auto_ai", companionAutoAi)
+            .apply()
+        syncAndSave()
+        updateUi()
     }
 
     private fun showJoinDialog() {
@@ -1438,9 +1503,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showCharacterSheet() {
+    private fun showCharacterSheet(forName: String = localPlayerName) {
         if (!nativeReady) return
-        val sheet = try { getDetailedSheet(localPlayerName) } catch (_: Exception) { "Hero not found." }
+        val sheet = try { getDetailedSheet(forName) } catch (_: Exception) { "Hero not found." }
         if (sheet.contains("not found", ignoreCase = true)) {
             Toast.makeText(this, sheet, Toast.LENGTH_SHORT).show()
             return
@@ -1457,7 +1522,7 @@ class MainActivity : AppCompatActivity() {
         val pointsHint = view.findViewById<TextView>(R.id.sheetPointsHint)
         val levelUpBtn = view.findViewById<Button>(R.id.sheetLevelUp)
 
-        nameTv.text = localPlayerName
+        nameTv.text = forName
         val lvlLine = sheet.lineSequence().firstOrNull { it.startsWith("Lvl ") }.orEmpty()
         classTv.text = lvlLine.substringBefore("|").trim().ifBlank { "Hero" }
         val gold = Regex("""Gold:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: "?"
@@ -1490,7 +1555,15 @@ class MainActivity : AppCompatActivity() {
             append("Weapon: ${weapon ?: "None"}")
             append("\nArmor: ${armor ?: "None"}")
         }
-        portrait.setImageResource(spriteFor(BattleUnit(true, localPlayerName, localClassId, cur, max)))
+        val classId = when {
+            forName.equals(localPlayerName, true) -> localClassId
+            else -> Regex("""Lvl \d+ (\w+)""").find(lvlLine)?.groupValues?.getOrNull(1)?.let {
+                when (it) {
+                    "Fighter" -> 0; "Wizard" -> 1; "Rogue" -> 2; "Cleric" -> 3; else -> 1
+                }
+            } ?: 1
+        }
+        portrait.setImageResource(spriteFor(BattleUnit(true, forName, classId, cur, max)))
         val canLevel = sheet.contains("POINTS TO SPEND")
         if (canLevel) {
             val pts = Regex("""POINTS TO SPEND:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1) ?: ""
@@ -1502,28 +1575,97 @@ class MainActivity : AppCompatActivity() {
             levelUpBtn.visibility = View.GONE
         }
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Hero Sheet")
+            .setTitle(if (forName.equals(localPlayerName, true)) "Hero Sheet" else "Companion Sheet")
             .setView(view)
             .setPositiveButton("Close", null)
             .create()
         levelUpBtn.setOnClickListener {
             dialog.dismiss()
-            showStatUpgradeDialog()
+            showStatUpgradeDialog(forName)
         }
         dialog.show()
     }
 
-    private fun showStatUpgradeDialog() {
+    private fun showCompanionSheet() {
+        if (!nativeReady) return
+        val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
+        if (dmTable) {
+            Toast.makeText(this, "DM table has no solo companion.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val name = try { getCompanionName() } catch (_: Exception) { "" }
+        if (name.isBlank()) {
+            Toast.makeText(this, "No companion in this party.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val auto = try { isCompanionAutoAi() } catch (_: Exception) { true }
+        val controlLabel = if (auto) "Auto (AI)" else "Player-controlled"
+        val inCombat = try { isInCombat() } catch (_: Exception) { false }
+        val options = mutableListOf(
+            "View sheet",
+            if (auto) "Switch to Player-controlled" else "Switch to Auto (AI)"
+        )
+        if (!inCombat) options.add("Change companion class…")
+        AlertDialog.Builder(this)
+            .setTitle("$name · $controlLabel")
+            .setItems(options.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> showCharacterSheet(name)
+                    1 -> {
+                        try {
+                            setCompanionAutoAi(!auto)
+                            syncAndSave()
+                            updateUi()
+                            Toast.makeText(
+                                this,
+                                if (!auto) "$name is Auto (AI)." else "$name is Player-controlled — act on their turn.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "setCompanionAutoAi failed", e)
+                        }
+                    }
+                    2 -> {
+                        val classes = arrayOf("Fighter — Bren", "Wizard — Melf", "Rogue — Sable", "Cleric — Miren")
+                        AlertDialog.Builder(this).setTitle("Companion class").setItems(classes) { _, cl ->
+                            val ok = try { setCompanionClass(cl) } catch (_: Exception) { false }
+                            if (ok) {
+                                prefs().edit().putInt("companion_class", cl).apply()
+                                syncAndSave()
+                                updateUi()
+                                showCharacterSheet(try { getCompanionName() } catch (_: Exception) { name })
+                            } else {
+                                Toast.makeText(this, "Can't change class during combat.", Toast.LENGTH_SHORT).show()
+                            }
+                        }.setNegativeButton("Cancel", null).show()
+                    }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun companionNameSafe(): String =
+        try { getCompanionName() } catch (_: Exception) { "" }
+
+    private fun isCompanionPlayerTurn(): Boolean {
+        val c = companionNameSafe()
+        if (c.isBlank()) return false
+        val auto = try { isCompanionAutoAi() } catch (_: Exception) { true }
+        if (auto) return false
+        return currentActorName().equals(c, ignoreCase = true)
+    }
+
+    private fun showStatUpgradeDialog(forName: String = localPlayerName) {
         val stats = arrayOf("Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma")
-        AlertDialog.Builder(this).setTitle("Spend Point").setItems(stats) { _, which ->
+        AlertDialog.Builder(this).setTitle("Spend Point — $forName").setItems(stats) { _, which ->
             performOrQueue("levelup", which) {
-                doIncreaseStat(localPlayerName, which)
+                doIncreaseStat(forName, which)
             }
             // Clients already toast "Sent to the DM…"; host/solo get sync via performOrQueue.
             if (!isOnlineClient) updateUi()
         }.show()
     }
-
 
     private fun parsePlayerGold(): Int {
         return try {
@@ -1660,8 +1802,9 @@ class MainActivity : AppCompatActivity() {
             it.startsWith("Room") || it.contains("Room ")
         } ?: "Room ?"
         val whose = turnLine.substringAfter("Turn:", "—").trim()
+        val companionTurnNow = isCompanionPlayerTurn()
         val myTurnBanner = whose.equals(localPlayerName, ignoreCase = true) ||
-            whose.equals("You", ignoreCase = true)
+            whose.equals("You", ignoreCase = true) || companionTurnNow
         turnBanner.text = when {
             isOnlineHost && status.contains("Game Over", ignoreCase = true) -> "DM · defeat…"
             isOnlineHost && status.contains("waiting for players", ignoreCase = true) -> "DM · waiting for heroes"
@@ -1686,6 +1829,7 @@ class MainActivity : AppCompatActivity() {
             isShop -> "Safe haven — merchant"
             try { isRoomCleared() } catch (_: Exception) { false } -> "Room clear — Search, Rest, or Onward"
             status.contains("Game Over", ignoreCase = true) -> "Defeat…"
+            companionTurnNow -> "Your move — ${companionNameSafe()}"
             myTurnBanner -> "Your move, $localPlayerName"
             else -> "$whose acts…"
         }
@@ -1714,13 +1858,17 @@ class MainActivity : AppCompatActivity() {
         val dmTable = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
         if (dmTable) {
             btnSheet.text = "DM"
+            btnCompanion.visibility = View.GONE
             turnBanner.text = when {
                 status.contains("Game Over", ignoreCase = true) -> "DM · defeat…"
                 getBattleRoster().substringBefore('|').isBlank() -> "DM · waiting for heroes to Join"
                 else -> "DM · tap DM for story tools"
             }
-        } else if (isOnlineClient && remoteDmName.isNotBlank()) {
-            btnSheet.text = "Sheet"
+        } else {
+            btnCompanion.visibility = if (companionNameSafe().isNotBlank()) View.VISIBLE else View.GONE
+            if (isOnlineClient && remoteDmName.isNotBlank()) {
+                btnSheet.text = "Sheet"
+            }
         }
 
 
@@ -1733,10 +1881,15 @@ class MainActivity : AppCompatActivity() {
             )
         }
         val clearedForTurn = !isShop && try { isRoomCleared() } catch (_: Exception) { false }
-        val isMyTurn = !isGameOver && !localDown && (
-            isShop || clearedForTurn ||
-                status.contains("Turn: Safe", ignoreCase = true) ||
-                status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
+        val companionTurnUi = isCompanionPlayerTurn()
+        val isMyTurn = !isGameOver && (
+            companionTurnUi || (
+                !localDown && (
+                    isShop || clearedForTurn ||
+                        status.contains("Turn: Safe", ignoreCase = true) ||
+                        status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
+                )
+            )
         )
 
         val dmTableLock = isOnlineHost && try { isDmTable() } catch (_: Exception) { isOnlineHost }
@@ -2017,15 +2170,24 @@ class MainActivity : AppCompatActivity() {
             applySelectionHighlights()
             Toast.makeText(this, "Target: $name", Toast.LENGTH_SHORT).show()
         } else {
-            if (selectedAllyName == name) {
-                selectedAllyName = null
+            if (allyTargetingMode) {
+                if (selectedAllyName == name) {
+                    selectedAllyName = null
+                } else {
+                    selectedAllyName = name
+                }
+                allyTargetingMode = false
+                stopTargetPulse()
+                applySelectionHighlights()
+                Toast.makeText(this, "Ally: $name", Toast.LENGTH_SHORT).show()
+            } else if (name.equals(localPlayerName, ignoreCase = true)) {
+                showCharacterSheet(localPlayerName)
+            } else if (name.equals(companionNameSafe(), ignoreCase = true) || name.contains("(NPC)")) {
+                showCompanionSheet()
             } else {
-                selectedAllyName = name
+                // Online party member — open read-only sheet
+                showCharacterSheet(name)
             }
-            allyTargetingMode = false
-            stopTargetPulse()
-            applySelectionHighlights()
-            Toast.makeText(this, "Ally: $name", Toast.LENGTH_SHORT).show()
         }
     }
 

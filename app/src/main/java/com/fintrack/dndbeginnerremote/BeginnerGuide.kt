@@ -98,9 +98,16 @@ object BeginnerGuide {
         val whose = turnLine.substringAfter(turnMarker).trim()
         if (whose.equals("Safe", true) || whose.equals("None", true)) return null
 
-        val myTurn = whose.equals(localPlayerName, true) || whose.equals("You", true)
+        val companionLine = status.lineSequence().firstOrNull { it.startsWith("Companion:") }
+        val companionPlayer = companionLine != null &&
+            companionLine.contains("[Player]", ignoreCase = true) &&
+            companionLine.contains(whose)
+        val myTurn = whose.equals(localPlayerName, true) || whose.equals("You", true) || companionPlayer
         if (!myTurn) {
-            return "DM: It's $whose's turn. Watch the log — enemies and allies act automatically."
+            return "DM: It's $whose's turn. Watch the log — enemies and Auto allies act automatically."
+        }
+        if (companionPlayer && !whose.equals(localPlayerName, true)) {
+            return "DM: $whose's turn (you control them). Use Attack / Special / Potion just like your hero."
         }
 
         val hurt = status.lineSequence().any { line ->
