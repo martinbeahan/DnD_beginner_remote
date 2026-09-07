@@ -257,6 +257,15 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun performOrQueue(actionType: String, targetIndex: Int, localApply: () -> Unit) {
+        try {
+            val st = getPlayerStatus()
+            if (st.contains("Game Over", ignoreCase = true)) {
+                Toast.makeText(this, "Game Over — start a new adventure.", Toast.LENGTH_SHORT).show()
+                btnReset.visibility = View.VISIBLE
+                clearSave("blocked action after death")
+                return
+            }
+        } catch (_: Exception) {}
         if (isOnlineClient) {
             val mp = multiplayer
             if (mp == null || !mp.isAvailable) {
@@ -441,14 +450,18 @@ class MainActivity : AppCompatActivity() {
         if (!nativeReady) return
         try {
             val data = saveGameState()
-            prefs().edit()
-                .putString("save_state", data)
-                .putString("hero_name", localPlayerName)
-                .putInt("hero_class", localClassId)
-                .putBoolean("crash_guard", false)
-                .putBoolean("was_online_host", isOnlineHost)
-                .putString("online_session_id", onlineSessionId)
-                .apply()
+            if (saveIsGameOver(data)) {
+                clearSave("defeat during sync")
+            } else {
+                prefs().edit()
+                    .putString("save_state", data)
+                    .putString("hero_name", localPlayerName)
+                    .putInt("hero_class", localClassId)
+                    .putBoolean("crash_guard", false)
+                    .putBoolean("was_online_host", isOnlineHost)
+                    .putString("online_session_id", onlineSessionId)
+                    .apply()
+            }
             // Only the DM/host publishes authoritative state
             if (!isUpdatingFromRemote && isOnlineHost) {
                 try { multiplayer?.updateState(data) } catch (e: Exception) {
@@ -467,6 +480,26 @@ class MainActivity : AppCompatActivity() {
         return data?.takeIf { it.isNotBlank() && it.contains("|") }
     }
 
+    /** Save header: sessionId,roomCount,gameOver,turn,merchant|... */
+    private fun saveIsGameOver(data: String): Boolean {
+        val bits = data.substringBefore('|').split(',')
+        return bits.size >= 3 && bits[2].trim() == "1"
+    }
+
+    private fun clearSave(reason: String? = null) {
+        prefs().edit().remove("save_state").apply()
+        if (reason != null) Log.i(TAG, "Cleared save: $reason")
+    }
+
+    private fun livableSavedState(): String? {
+        val data = savedState() ?: return null
+        if (saveIsGameOver(data)) {
+            clearSave("game over")
+            return null
+        }
+        return data
+    }
+
     private fun heroNameFromSave(data: String): String {
         val stored = prefs().getString("hero_name", null)?.trim().orEmpty()
         if (stored.isNotEmpty()) return stored
@@ -481,8 +514,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Native library not ready — can't load save.", Toast.LENGTH_LONG).show()
             return
         }
-        val data = savedState() ?: run {
-            Toast.makeText(this, "No save found.", Toast.LENGTH_SHORT).show()
+        val data = livableSavedState() ?: run {
+            Toast.makeText(this, "No living adventure to continue — start a new one.", Toast.LENGTH_LONG).show()
             showStartDialog()
             return
         }
@@ -517,7 +550,14 @@ class MainActivity : AppCompatActivity() {
             showStartDialog()
             return
         }
-        btnReset.visibility = if (status.contains("Game Over")) View.VISIBLE else View.GONE
+        if (status.contains("Game Over", ignoreCase = true) || saveIsGameOver(data)) {
+            clearSave("continued into game over")
+            sessionActive = false
+            Toast.makeText(this, "That adventure already ended. Start a new one.", Toast.LENGTH_LONG).show()
+            showStartDialog()
+            return
+        }
+        btnReset.visibility = View.GONE
         refreshBattleArena()
         updateUi()
         Toast.makeText(this, "Welcome back, $localPlayerName (solo)", Toast.LENGTH_SHORT).show()
@@ -526,7 +566,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showStartDialog() {
         Log.d(TAG, "Showing start dialog")
-        val saved = savedState()
+        val saved = livableSavedState()
         val modes = mutableListOf<String>()
         if (saved != null) modes += "Continue solo save (${heroNameFromSave(saved)})"
         modes += "Solo adventure"
@@ -810,13 +850,19 @@ class MainActivity : AppCompatActivity() {
         btnRest.text = if (isShop) "Leave" else "🌙\nRest"
         btnInteract.visibility = if (isShop) View.GONE else View.VISIBLE
 
-        val isMyTurn = isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
-        val isGameOver = status.contains("Game Over")
+        val isGameOver = status.contains("Game Over", ignoreCase = true)
+        val localDown = status.lineSequence().any {
+            it.contains(localPlayerName) && it.contains("[DOWN]", ignoreCase = true)
+        }
+        val isMyTurn = !isGameOver && !localDown && (
+            isShop || status.contains("Turn: $localPlayerName") || status.contains("Turn: You")
+        )
 
-        btnAttack.isEnabled = isMyTurn && !isGameOver
-        btnSpecial.isEnabled = isMyTurn && !isGameOver
-        btnHeal.isEnabled = isMyTurn && !isGameOver
-        btnRest.isEnabled = isMyTurn && !isGameOver
+        btnAttack.isEnabled = isMyTurn
+        btnSpecial.isEnabled = isMyTurn
+        btnHeal.isEnabled = isMyTurn
+        btnRest.isEnabled = isMyTurn
+        btnInteract.isEnabled = isMyTurn || (isShop && !isGameOver)
 
         val roomDesc = getRoomDescription()
         if (roomDesc != lastRoomDesc) {
@@ -836,12 +882,25 @@ class MainActivity : AppCompatActivity() {
         if (lastEv.isNotEmpty() && lastEv != lastProcessedEvent) {
             logText.text = lastEv
             lastProcessedEvent = lastEv
-            if (lastEv.contains("Game Over")) btnReset.visibility = View.VISIBLE
+            if (lastEv.contains("Game Over", ignoreCase = true)) {
+                btnReset.visibility = View.VISIBLE
+                clearSave("game over event")
+            }
             maybeAnimateFromEvent(lastEv)
         }
 
+        if (isGameOver) {
+            btnReset.visibility = View.VISIBLE
+            btnAttack.isEnabled = false
+            btnSpecial.isEnabled = false
+            btnHeal.isEnabled = false
+            btnRest.isEnabled = false
+            btnInteract.isEnabled = false
+            clearSave("game over ui")
+        }
+
         refreshBattleArena()
-        maybeSoloDmCoach(status, isShop)
+        if (!isGameOver) maybeSoloDmCoach(status, isShop)
     }
 
     private data class BattleUnit(
