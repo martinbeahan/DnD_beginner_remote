@@ -174,11 +174,20 @@
             android:visibility="gone" />
 
         <Button
-            android:id="@+id/sheetLevelUp"
+            android:id="@+id/sheetInventory"
             style="@style/Widget.DnD.ActionButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:minHeight="48dp"
+            android:text="Open Inventory" />
+
+        <Button
+            android:id="@+id/sheetLevelUp"
+            style="@style/Widget.DnD.ActionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:minHeight="48dp"
             android:text="Assign attribute points"
             android:visibility="gone" />

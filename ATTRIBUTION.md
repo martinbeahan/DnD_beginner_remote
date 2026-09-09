@@ -91,3 +91,16 @@ Dungeons & Dragons product. Wizards of the Coast, Dungeons & Dragons, and relate
 marks are trademarks of Wizards of the Coast LLC. Original adventure text in this
 project (including the Solo quest *Ashen Lantern*) is original and not copied from
 any Wizards of the Coast adventure module.
+
+## Boss encounters (v2.2)
+
+Bosses use **original names and flavor text** (Goblin King, Skeleton King, Ashen Drake). No published adventure text.
+
+Sprites reuse existing LuizMelo CC0 frames already shipped in the app (no new downloads):
+
+| Boss | Reuses |
+|---|---|
+| Goblin King | `sprite_goblin.png` / `_atk` |
+| Skeleton King | `sprite_skeleton.png` / `_atk` |
+| Ashen Drake | `sprite_ogre.png` / `_atk` (large creature stand-in) |
+

@@ -27,6 +27,9 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     chatHistory_.clear();
     journalEntries_.clear();
     shopInventory_.clear();
+    pendingBossXpBonus_ = 0;
+    pendingBossLootLuck_ = 0;
+    pendingBossGoldBonus_ = 0;
     while(!visualEvents_.empty()) visualEvents_.pop();
 
     gameOver_ = false;
@@ -289,6 +292,9 @@ bool Game::setCompanionClass(CharacterClass cl) {
     const int level = old->level;
     const int xp = old->xp;
     const int gold = old->gold;
+    auto keptInv = old->inventory;
+    auto keptW = old->equippedWeapon;
+    auto keptA = old->equippedArmor;
     const int pending = old->pendingStatPoints;
     const int initiative = old->initiative;
     const bool ai = old->aiControlled;
@@ -309,7 +315,36 @@ bool Game::setCompanionClass(CharacterClass cl) {
         neu->pendingStatPoints = pending;
         neu->initiative = initiative;
         neu->aiControlled = ai;
+        neu->inventory = keptInv;
+        // Keep gear if still class-legal; else stash to bag.
+        neu->equippedWeapon = nullptr;
+        neu->equippedArmor = nullptr;
+        if (keptW) {
+            if (keptW->canEquip(cl)) neu->equippedWeapon = keptW;
+            else neu->addToInventory(keptW);
+        }
+        if (keptA) {
+            if (keptA->canEquip(cl)) neu->equippedArmor = keptA;
+            else neu->addToInventory(keptA);
+        }
+        if (!neu->equippedWeapon || !neu->equippedArmor) {
+            // Ensure starters fill empty slots without wiping bag.
+            const int cls = static_cast<int>(cl);
+            if (!neu->equippedWeapon) {
+                if (cl == CharacterClass::FIGHTER) neu->equippedWeapon = Item::make("Longsword", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+                else if (cl == CharacterClass::ROGUE) neu->equippedWeapon = Item::make("Shortsword", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+                else if (cl == CharacterClass::WIZARD) neu->equippedWeapon = Item::make("Quarterstaff", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+                else neu->equippedWeapon = Item::make("Mace", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+            }
+            if (!neu->equippedArmor) {
+                if (cl == CharacterClass::FIGHTER) neu->equippedArmor = Item::make("Chain Shirt", ItemType::ARMOR, 3, ItemRarity::COMMON, cls);
+                else if (cl == CharacterClass::ROGUE) neu->equippedArmor = Item::make("Leather Armor", ItemType::ARMOR, 1, ItemRarity::COMMON, cls);
+                else if (cl == CharacterClass::WIZARD) neu->equippedArmor = Item::make("Traveler Clothes", ItemType::ARMOR, 0, ItemRarity::COMMON, -1);
+                else neu->equippedArmor = Item::make("Scale Mail", ItemType::ARMOR, 4, ItemRarity::COMMON, cls);
+            }
+        }
         neu->applyStatsForLevel();
+        neu->calculateAC();
         neu->currentHp = neu->maxHp;
         neu->resources = neu->maxResources;
         neu->isDowned = down;
@@ -425,9 +460,14 @@ void Game::spawnSoloQuestEnemies() {
             // Puzzle-lite soft open: Search once for the rune-key (no mandatory fight).
             break;
         case SoloQuestBeat::BONE_GALLERY:
-            // Two softer skeletons (no Action Surge; lower STR) instead of tanky pair.
-            makeFoe("Skeleton", CharacterClass::FIGHTER, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
-            makeFoe("Skeleton", CharacterClass::FIGHTER, -2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            // Medium+: small chance the gallery hosts the Skeleton King (alone). Easy keeps soft pair.
+            if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM) && getRandomInt(1, 100) <= 18) {
+                spawnNamedBoss("Skeleton King", 2);
+                dmSay("A crowned horror stirs among the bones — the Skeleton King (original foe).");
+            } else {
+                makeFoe("Skeleton", CharacterClass::FIGHTER, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+                makeFoe("Skeleton", CharacterClass::FIGHTER, -2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            }
             break;
         case SoloQuestBeat::LANTERN_VAULT:
             // Climax retained: one Champion, HP/AC one notch down, single surge max.
@@ -446,8 +486,14 @@ void Game::spawnSoloQuestEnemies() {
             makeFoe("Debt Enforcer", CharacterClass::FIGHTER, 2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
             break;
         case SoloQuestBeat::ACT2_WEIR:
-            makeFoe("River Goblin", CharacterClass::ROGUE, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
-            makeFoe("River Goblin", CharacterClass::ROGUE, -2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            // Medium+: rare Goblin King ambush at the weir (Easy keeps soft river goblins).
+            if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM) && getRandomInt(1, 100) <= 16) {
+                spawnNamedBoss("Goblin King", 1);
+                dmSay("Scrap-iron crown by the millrace — the Goblin King (original) bars the path!");
+            } else {
+                makeFoe("River Goblin", CharacterClass::ROGUE, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+                makeFoe("River Goblin", CharacterClass::ROGUE, -2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            }
             break;
         case SoloQuestBeat::ACT2_CELLAR:
             makeFoe("Skeleton", CharacterClass::FIGHTER, 2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
@@ -483,7 +529,7 @@ void Game::grantAshenLantern(Character* actor) {
     }
     if (hero) {
         // Thematic quest item: modest weapon blessing without replacing class identity harshly.
-        hero->equippedWeapon = std::make_shared<Item>(Item{"Ashen Lantern", ItemType::WEAPON, 1});
+        hero->equippedWeapon = Item::make("Ashen Lantern", ItemType::WEAPON, 1, ItemRarity::RARE, -1);
         hero->gold += 25;
     }
     dmSay("You seize the Ashen Lantern. Grey glass drinks the dark — Millhollow's hope is in your hands.");
@@ -627,11 +673,13 @@ void Game::spawnRoomContent() {
         isMerchantRoom_ = true;
         roomDescription_ = "You find a rare pocket of safety. A weary Merchant awaits.";
         dmSay("A lantern glows ahead. A traveling merchant offers goods — and a chance for a longer rest from the grind.");
-        shopInventory_.push_back(std::make_shared<Item>(Item{"Steel Blade", ItemType::WEAPON, (roomCount_ / 4)}));
-        shopInventory_.push_back(std::make_shared<Item>(Item{"Platemail", ItemType::ARMOR, (roomCount_ / 4)}));
-        shopInventory_.push_back(std::make_shared<Item>(Item{"Greater Potion", ItemType::POTION, 10}));
+        restockShop();
         return;
     }
+
+    // Boss chance for deep crawl / post-quest procedural rooms (gated so beginners are not soft-locked).
+    maybeSpawnBossEncounter();
+    if (!enemies_.empty()) return;
 
     auto goblin = std::make_unique<Character>("Goblin", CharacterClass::ROGUE, "goblin-" + std::to_string(getRandomInt(0, 1000000)));
     goblin->maxHp += (roomCount_ * 2);
@@ -710,6 +758,28 @@ Character* Game::findCharacter(const std::string& name) {
     return nullptr;
 }
 
+void Game::restockShop() {
+    shopInventory_.clear();
+    int depthBonus = std::max(0, roomCount_ / 4);
+    // Mix by rarity: cheaper commons, rarer expensive; class-tagged + any.
+    shopInventory_.push_back(Item::make("Traveler Blade", ItemType::WEAPON, depthBonus, ItemRarity::COMMON, -1));
+    shopInventory_.push_back(Item::make("Padded Vest", ItemType::ARMOR, depthBonus, ItemRarity::COMMON, -1));
+    shopInventory_.push_back(Item::make("Healing Draught", ItemType::POTION, 8 + depthBonus, ItemRarity::COMMON, -1));
+    shopInventory_.push_back(Item::make("Fighter's Arming Sword", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 0));
+    shopInventory_.push_back(Item::make("Wizard's Focus Rod", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 1));
+    shopInventory_.push_back(Item::make("Rogue's Stiletto", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 2));
+    shopInventory_.push_back(Item::make("Cleric's Warhammer", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 3));
+    if (roomCount_ >= 6) {
+        shopInventory_.push_back(Item::make("Knight Plate", ItemType::ARMOR, depthBonus + 3, ItemRarity::RARE, 0));
+        shopInventory_.push_back(Item::make("Veil of Shadows", ItemType::ARMOR, depthBonus + 2, ItemRarity::RARE, 2));
+    }
+    if (roomCount_ >= 10) {
+        shopInventory_.push_back(Item::make("Starfire Staff", ItemType::WEAPON, depthBonus + 3, ItemRarity::EPIC, 1));
+        shopInventory_.push_back(Item::make("Reliquary Mail", ItemType::ARMOR, depthBonus + 4, ItemRarity::EPIC, 3));
+    }
+    shopInventory_.push_back(Item::make("Greater Potion", ItemType::POTION, 14 + depthBonus, ItemRarity::UNCOMMON, -1));
+}
+
 bool Game::buyItem(const std::string& playerName, int itemIndex) {
     if (gameOver_) return false;
     if (!isMerchantRoom_ || itemIndex < 0 || static_cast<size_t>(itemIndex) >= shopInventory_.size()) return false;
@@ -717,15 +787,19 @@ bool Game::buyItem(const std::string& playerName, int itemIndex) {
     if (!hero || hero->isDead) return false;
 
     auto item = shopInventory_[static_cast<size_t>(itemIndex)];
-    int cost = (item->bonus + 1) * 25;
+    int cost = item->shopCost();
 
     if (hero->gold >= cost) {
         hero->gold -= cost;
-        if (item->type == ItemType::WEAPON) hero->equippedWeapon = item;
-        else if (item->type == ItemType::ARMOR) { hero->equippedArmor = item; hero->calculateAC(); }
-        else hero->heal(item->bonus);
-        lastEvent_ = hero->name + " purchased " + item->name + "!";
+        if (item->type == ItemType::POTION) {
+            hero->heal(item->bonus);
+            lastEvent_ = hero->name + " purchased and drank " + item->name + "!";
+        } else {
+            hero->addToInventory(item);
+            lastEvent_ = hero->name + " purchased " + item->name + " [" + item->rarityLabel() + "] — open Inventory to equip.";
+        }
         addJournalEntry(hero->name + " bought " + item->name + " for " + std::to_string(cost) + " gold.");
+        shopInventory_.erase(shopInventory_.begin() + itemIndex);
         return true;
     }
     lastEvent_ = "Not enough gold!";
@@ -736,9 +810,208 @@ std::string Game::getShopManifest() const {
     if (!isMerchantRoom_) return "";
     std::stringstream ss;
     for (size_t i = 0; i < shopInventory_.size(); ++i) {
-        ss << i << ":" << shopInventory_[i]->name << " (" << (shopInventory_[i]->bonus + 1) * 25 << "g);";
+        const auto& it = shopInventory_[i];
+        // idx:name|bonus|type|rarity|class|cost
+        ss << i << ":" << it->name << "|" << it->bonus << "|"
+           << (it->type == ItemType::WEAPON ? "Weapon" : (it->type == ItemType::ARMOR ? "Armor" : "Potion"))
+           << "|" << it->rarityLabel() << "|" << it->classLabel() << "|" << it->shopCost() << ";";
     }
     return ss.str();
+}
+
+std::string Game::getInventoryManifest(const std::string& playerName) const {
+    Character* hero = nullptr;
+    for (const auto& p : players_) {
+        if (p && p->name == playerName) { hero = p.get(); break; }
+    }
+    if (!hero) return "";
+    std::stringstream ss;
+    auto emit = [&](const std::shared_ptr<Item>& it, const char* slot, int index) {
+        if (!it) return;
+        ss << index << ":" << it->name << "|" << it->bonus << "|"
+           << (it->type == ItemType::WEAPON ? "Weapon" : (it->type == ItemType::ARMOR ? "Armor" : "Potion"))
+           << "|" << it->rarityLabel() << "|" << it->classLabel() << "|" << slot
+           << "|" << it->upgradeLevel << "|" << it->upgradeCost() << ";";
+    };
+    // Equipped first with negative-ish slots encoded as weapon/armor indices in slot field
+    emit(hero->equippedWeapon, "weapon", -1);
+    emit(hero->equippedArmor, "armor", -2);
+    for (size_t i = 0; i < hero->inventory.size(); ++i) {
+        emit(hero->inventory[i], "bag", static_cast<int>(i));
+    }
+    return ss.str();
+}
+
+bool Game::equipInventoryItem(const std::string& playerName, int invIndex) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    if (invIndex < 0 || static_cast<size_t>(invIndex) >= hero->inventory.size()) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    auto item = hero->inventory[static_cast<size_t>(invIndex)];
+    if (!item || item->type == ItemType::POTION) {
+        lastEvent_ = "Cannot equip that.";
+        return false;
+    }
+    if (!item->canEquip(hero->characterClass)) {
+        lastEvent_ = item->name + " is for " + item->classLabel() + "s only.";
+        return false;
+    }
+    hero->inventory.erase(hero->inventory.begin() + invIndex);
+    if (item->type == ItemType::WEAPON) {
+        if (hero->equippedWeapon) hero->addToInventory(hero->equippedWeapon);
+        hero->equippedWeapon = item;
+    } else {
+        if (hero->equippedArmor) hero->addToInventory(hero->equippedArmor);
+        hero->equippedArmor = item;
+        hero->calculateAC();
+    }
+    lastEvent_ = hero->name + " equips " + item->getDescription() + ".";
+    return true;
+}
+
+bool Game::unequipSlot(const std::string& playerName, int slot) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    if (slot == 0) {
+        if (!hero->equippedWeapon) { lastEvent_ = "No weapon equipped."; return false; }
+        hero->addToInventory(hero->equippedWeapon);
+        lastEvent_ = hero->name + " unequips " + hero->equippedWeapon->name + ".";
+        hero->equippedWeapon = nullptr;
+        return true;
+    }
+    if (slot == 1) {
+        if (!hero->equippedArmor) { lastEvent_ = "No armor equipped."; return false; }
+        hero->addToInventory(hero->equippedArmor);
+        lastEvent_ = hero->name + " unequips " + hero->equippedArmor->name + ".";
+        hero->equippedArmor = nullptr;
+        hero->calculateAC();
+        return true;
+    }
+    lastEvent_ = "Bad slot.";
+    return false;
+}
+
+bool Game::upgradeInventoryItem(const std::string& playerName, int invIndex) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    if (invIndex < 0 || static_cast<size_t>(invIndex) >= hero->inventory.size()) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    std::string err;
+    auto& item = hero->inventory[static_cast<size_t>(invIndex)];
+    int cost = item ? item->upgradeCost() : 0;
+    if (!hero->upgradeOwnedItem(item, err)) {
+        lastEvent_ = err;
+        return false;
+    }
+    lastEvent_ = hero->name + " upgrades " + item->name + " to +" + std::to_string(item->bonus)
+        + " for " + std::to_string(cost) + "g.";
+    addJournalEntry(lastEvent_);
+    return true;
+}
+
+bool Game::upgradeEquippedItem(const std::string& playerName, int slot) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    std::shared_ptr<Item>* ptr = (slot == 0) ? &hero->equippedWeapon : (slot == 1 ? &hero->equippedArmor : nullptr);
+    if (!ptr || !*ptr) { lastEvent_ = "Nothing equipped there."; return false; }
+    std::string err;
+    int cost = (*ptr)->upgradeCost();
+    if (!hero->upgradeOwnedItem(*ptr, err)) {
+        lastEvent_ = err;
+        return false;
+    }
+    lastEvent_ = hero->name + " upgrades " + (*ptr)->name + " to +" + std::to_string((*ptr)->bonus)
+        + " for " + std::to_string(cost) + "g.";
+    addJournalEntry(lastEvent_);
+    return true;
+}
+
+void Game::spawnNamedBoss(const std::string& name, int tier) {
+    CharacterClass cl = CharacterClass::FIGHTER;
+    if (tier == 1) cl = CharacterClass::ROGUE;
+    else if (tier == 3) cl = CharacterClass::WIZARD;
+    auto foe = std::make_unique<Character>(name, cl, name + "-" + std::to_string(getRandomInt(0, 1000000)));
+    // Scale carefully: Easy/Medium stay fair; Harder difficulties punch up.
+    int hpBonus = 10 + tier * 8 + roomCount_;
+    int acBonus = tier;
+    int atkDelta = (tier >= 3) ? 0 : -1;
+    if (difficulty_ <= static_cast<int>(Difficulty::EASY)) {
+        hpBonus = std::max(8, hpBonus - 8);
+        acBonus = std::max(0, acBonus - 1);
+        atkDelta -= 1;
+    } else if (difficulty_ == static_cast<int>(Difficulty::MEDIUM)) {
+        hpBonus = std::max(10, hpBonus - 4);
+    } else if (difficulty_ >= static_cast<int>(Difficulty::HARD)) {
+        hpBonus += 6 + tier * 2;
+        acBonus += 1;
+    }
+    foe->maxHp += hpBonus;
+    foe->currentHp = foe->maxHp;
+    foe->armorClass += acBonus;
+    foe->resources = std::min(foe->maxResources, tier);
+    // Nudge primary attack stat
+    if (cl == CharacterClass::ROGUE) foe->attributes.dexterity = std::max(8, foe->attributes.dexterity + atkDelta);
+    else if (cl == CharacterClass::WIZARD) foe->attributes.intelligence = std::max(8, foe->attributes.intelligence + atkDelta);
+    else foe->attributes.strength = std::max(8, foe->attributes.strength + atkDelta);
+    enemies_.push_back(std::move(foe));
+}
+
+void Game::maybeSpawnBossEncounter() {
+    // Never soft-lock early story beginners: only procedural crawl / post-quest rooms.
+    if (isSoloQuestScripted()) return;
+    if (roomCount_ < 6) return;
+
+    int roll = getRandomInt(1, 100);
+    // Ashen Drake (Dragon) — late gate only
+    int dragonNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 18 : 16;
+    if (roomCount_ >= dragonNeed && roll <= 10) {
+        spawnNamedBoss("Ashen Drake", 3);
+        roomDescription_ = "The chamber opens into a scorched hollow. An Ashen Drake coils around a cracked pillar — heat warps the air.";
+        dmSay("Original menace: the Ashen Drake (not from any published module). Stand ready — this is a late-game trial.");
+        addJournalEntry("Boss: Ashen Drake stirs in the deep.");
+        return;
+    }
+    // Skeleton King — mid-deep
+    int skNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 12 : 10;
+    if (roomCount_ >= skNeed && roll <= 18) {
+        spawnNamedBoss("Skeleton King", 2);
+        roomDescription_ = "Bone thrones and rusted crowns litter the floor. The Skeleton King rises, empty eyes fixed on you.";
+        dmSay("The Skeleton King claims this ossuary. Original foe — fight smart.");
+        addJournalEntry("Boss: Skeleton King.");
+        return;
+    }
+    // Goblin King — earliest boss, still gated
+    int gkNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 8 : 6;
+    if (roomCount_ >= gkNeed && roll <= 22) {
+        spawnNamedBoss("Goblin King", 1);
+        // Add a weak attendant on Medium+ so it feels like a court, not a brick wall alone on Easy.
+        if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM)) {
+            auto scout = std::make_unique<Character>("Goblin Scout", CharacterClass::ROGUE, "gk-scout-" + std::to_string(getRandomInt(0, 1000000)));
+            scout->maxHp = std::max(4, scout->maxHp - 4);
+            scout->currentHp = scout->maxHp;
+            enemies_.push_back(std::move(scout));
+        }
+        roomDescription_ = "Crude banners hang from spikes. The Goblin King bellows a challenge from a scrap-iron throne.";
+        dmSay("The Goblin King! Original boss — richer spoils if you prevail.");
+        addJournalEntry("Boss: Goblin King.");
+    }
+}
+
+void Game::noteBossDefeat(const std::string& foeName) {
+    int tier = LootSystem::bossTier(foeName);
+    if (tier <= 0) return;
+    pendingBossXpBonus_ += 40 * tier + roomCount_ * 2;
+    pendingBossLootLuck_ += 15 + tier * 12;
+    pendingBossGoldBonus_ += 20 * tier + getRandomInt(5, 15);
+    dmSay("Boss fallen: " + foeName + "! Greater rewards await.");
 }
 
 void Game::advanceTurn() {
@@ -870,6 +1143,12 @@ bool Game::isAllyAi(const Character* c) const {
 
 void Game::grantKillLoot(Character* actor, const std::string& foeName) {
     int gold = 8 + (roomCount_ * 3) + getRandomInt(0, 7);
+    if (LootSystem::isBossName(foeName)) {
+        noteBossDefeat(foeName);
+        gold += pendingBossGoldBonus_;
+        pendingBossGoldBonus_ = 0;
+        gold = static_cast<int>(gold * (1.5 + 0.25 * LootSystem::bossTier(foeName)));
+    }
     Character* looter = actor;
     if (!looter || looter->isDead) {
         looter = nullptr;
@@ -887,22 +1166,33 @@ void Game::grantKillLoot(Character* actor, const std::string& foeName) {
 }
 
 void Game::enterClearedRoom(Character* actor) {
-    int xpGained = 50 + (roomCount_ * 15);
+    int xpGained = 50 + (roomCount_ * 15) + pendingBossXpBonus_;
+    pendingBossXpBonus_ = 0;
     for (auto& p : players_) {
         if (p->addXp(xpGained)) {
             dmSay(p->name + " levels up! Spend your ability points from the character sheet.");
         }
     }
     dmSay("The party gains " + std::to_string(xpGained) + " XP.");
+    int luck = pendingBossLootLuck_;
+    pendingBossLootLuck_ = 0;
     if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::LANTERN_VAULT) {
         grantAshenLantern(actor);
     } else if (actor && !actor->isDead) {
-        auto loot = LootSystem::generateLoot(roomCount_);
+        int prefer = static_cast<int>(actor->characterClass);
+        auto loot = LootSystem::generateLoot(roomCount_, luck, prefer);
         if (loot) {
-            if (loot->type == ItemType::WEAPON) actor->equippedWeapon = loot;
-            else if (loot->type == ItemType::ARMOR) { actor->equippedArmor = loot; actor->calculateAC(); }
-            dmSay(actor->name + " finds " + loot->getDescription() + " among the spoils.");
-            addJournalEntry(actor->name + " found loot: " + loot->getDescription());
+            actor->addToInventory(loot);
+            dmSay(actor->name + " finds " + loot->getDescription() + " [" + loot->rarityLabel() + "] — check Inventory.");
+            addJournalEntry(actor->name + " found loot: " + loot->getDescription() + " (" + loot->rarityLabel() + ")");
+        } else if (luck > 0) {
+            // Boss clears always drop something when luck was banked but roll missed — guarantee uncommon+.
+            auto pity = LootSystem::generateLoot(roomCount_, 80, prefer);
+            if (pity) {
+                actor->addToInventory(pity);
+                dmSay(actor->name + " claims a boss trophy: " + pity->getDescription() + " [" + pity->rarityLabel() + "].");
+                addJournalEntry(actor->name + " claimed boss loot: " + pity->getDescription());
+            }
         }
     }
     // Stay in this chamber so Short Rest / one Search / Onward are available.
@@ -1781,12 +2071,18 @@ std::string Game::serialize() {
     // Section 2: Players
     for (const auto& p : players_) {
         ss << p->name << "," << static_cast<int>(p->characterClass) << "," << p->level << "," << p->xp << "," << p->currentHp << "," << p->maxHp << "," << p->resources << "," << p->maxResources << "," << p->pendingStatPoints << "," << p->attributes.strength << "," << p->attributes.dexterity << "," << p->attributes.constitution << "," << p->attributes.intelligence << "," << p->attributes.wisdom << "," << p->attributes.charisma << "," << p->gold << "," << p->initiative << "," << p->uid << ",";
-        if (p->equippedWeapon) ss << p->equippedWeapon->name << ":" << p->equippedWeapon->bonus << ":W"; else ss << "None:0:W";
+        if (p->equippedWeapon) ss << p->equippedWeapon->toToken(); else ss << "None:0:W:0:-1:0";
         ss << ",";
-        if (p->equippedArmor) ss << p->equippedArmor->name << ":" << p->equippedArmor->bonus << ":A"; else ss << "None:0:A";
+        if (p->equippedArmor) ss << p->equippedArmor->toToken(); else ss << "None:0:A:0:-1:0";
         ss << "," << (p->isDowned ? 1 : 0) << "," << p->deathSaveSuccesses << "," << p->deathSaveFailures
            << "," << (p->isStable ? 1 : 0) << "," << (p->isDead ? 1 : 0)
            << "," << (p->aiControlled ? 1 : 0);
+        // Inventory bag (hero required; companion included): tokens joined by ^
+        ss << ",";
+        for (size_t ii = 0; ii < p->inventory.size(); ++ii) {
+            if (ii) ss << "^";
+            if (p->inventory[ii]) ss << p->inventory[ii]->toToken();
+        }
         ss << ";";
     }
     ss << "|";
@@ -1812,6 +2108,10 @@ void Game::deserialize(const std::string& data) {
     // Drop turn pointers BEFORE destroying Character unique_ptrs (avoids use-after-free hangs).
     turnOrder_.clear();
     currentTurnIndex_ = 0;
+    pendingBossXpBonus_ = 0;
+    pendingBossLootLuck_ = 0;
+    pendingBossGoldBonus_ = 0;
+    shopInventory_.clear();
 
     std::stringstream ss(data);
     std::string section;
@@ -1903,22 +2203,12 @@ void Game::deserialize(const std::string& data) {
 
             std::string item_w, item_a;
             if (std::getline(ss_p, item_w, ',')) {
-                size_t p1 = item_w.find(':');
-                size_t p2 = item_w.find(':', p1 + 1);
-                if (p1 != std::string::npos && p2 != std::string::npos) {
-                    std::string name = item_w.substr(0, p1);
-                    int bonus = std::stoi(item_w.substr(p1 + 1, p2 - p1 - 1));
-                    if (name != "None") p->equippedWeapon = std::make_shared<Item>(Item{name, ItemType::WEAPON, bonus});
-                }
+                auto w = Item::fromToken(item_w);
+                if (w) p->equippedWeapon = w;
             }
             if (std::getline(ss_p, item_a, ',')) {
-                size_t p1 = item_a.find(':');
-                size_t p2 = item_a.find(':', p1 + 1);
-                if (p1 != std::string::npos && p2 != std::string::npos) {
-                    std::string name = item_a.substr(0, p1);
-                    int bonus = std::stoi(item_a.substr(p1 + 1, p2 - p1 - 1));
-                    if (name != "None") p->equippedArmor = std::make_shared<Item>(Item{name, ItemType::ARMOR, bonus});
-                }
+                auto a = Item::fromToken(item_a);
+                if (a) p->equippedArmor = a;
             }
             // Optional trailing death-save fields (backward compatible with older saves).
             std::string down_s, dss_s, dsf_s, stab_s, dead_s;
@@ -1934,6 +2224,19 @@ void Game::deserialize(const std::string& data) {
                 } else {
                     // Legacy saves: NPC-named allies were always AI-controlled.
                     p->aiControlled = (p->name.find("(NPC)") != std::string::npos);
+                }
+                // Optional inventory bag (v2.2+): ^-joined tokens
+                std::string inv_s;
+                if (std::getline(ss_p, inv_s, ',')) {
+                    p->inventory.clear();
+                    if (!inv_s.empty()) {
+                        std::stringstream invss(inv_s);
+                        std::string tok;
+                        while (std::getline(invss, tok, '^')) {
+                            auto it = Item::fromToken(tok);
+                            if (it) p->inventory.push_back(it);
+                        }
+                    }
                 }
             } else {
                 p->isDowned = (p->currentHp <= 0);

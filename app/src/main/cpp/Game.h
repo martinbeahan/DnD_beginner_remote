@@ -63,6 +63,13 @@ public:
     bool buyItem(const std::string& playerName, int itemIndex);
     std::string getShopManifest() const;
 
+    // Inventory / gear upgrades
+    std::string getInventoryManifest(const std::string& playerName) const;
+    bool equipInventoryItem(const std::string& playerName, int invIndex);
+    bool unequipSlot(const std::string& playerName, int slot); // 0=weapon, 1=armor
+    bool upgradeInventoryItem(const std::string& playerName, int invIndex);
+    bool upgradeEquippedItem(const std::string& playerName, int slot); // 0=weapon, 1=armor
+
     // Turn Management
     void processTurn();
     void spawnRoomContent();
@@ -153,6 +160,9 @@ private:
     std::queue<VisualEvent> visualEvents_;
 
     std::vector<std::shared_ptr<Item>> shopInventory_;
+    int pendingBossXpBonus_ = 0;
+    int pendingBossLootLuck_ = 0;
+    int pendingBossGoldBonus_ = 0;
 
     int turnCounter_;
     int roomCount_;
@@ -190,6 +200,10 @@ private:
     void purgeDownedEnemies();
     void enterClearedRoom(Character* actor);
     void grantKillLoot(Character* actor, const std::string& foeName);
+    void restockShop();
+    void maybeSpawnBossEncounter();
+    void spawnNamedBoss(const std::string& name, int tier);
+    void noteBossDefeat(const std::string& foeName);
     void dmSay(const std::string& line);
     void resetSoloQuestState();
     void applySoloQuestRoom();
