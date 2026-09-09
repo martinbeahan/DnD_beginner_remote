@@ -17,4 +17,9 @@
     <color name="blood">#FF8B1E1E</color>
     <color name="hp_fill">#FF2E7D32</color>
     <color name="stone">#FF3A322C</color>
+
+    <color name="rarity_common">#FFB0B0B0</color>
+    <color name="rarity_uncommon">#FF4CAF50</color>
+    <color name="rarity_rare">#FF42A5F5</color>
+    <color name="rarity_epic">#FFAB47BC</color>
 </resources>

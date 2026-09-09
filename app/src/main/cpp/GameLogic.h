@@ -36,16 +36,121 @@ enum class ItemType {
     POTION
 };
 
+enum class ItemRarity {
+    COMMON = 0,
+    UNCOMMON = 1,
+    RARE = 2,
+    EPIC = 3
+};
+
+/** classTag: -1 = any class; else CharacterClass ordinal. */
 struct Item {
     std::string name;
     ItemType type;
-    int bonus;
+    int bonus = 0;
+    ItemRarity rarity = ItemRarity::COMMON;
+    int classTag = -1;
+    int upgradeLevel = 0;
+
+    static const char* rarityName(ItemRarity r) {
+        switch (r) {
+            case ItemRarity::COMMON: return "Common";
+            case ItemRarity::UNCOMMON: return "Uncommon";
+            case ItemRarity::RARE: return "Rare";
+            case ItemRarity::EPIC: return "Epic";
+        }
+        return "Common";
+    }
+
+    static const char* classTagName(int tag) {
+        switch (tag) {
+            case 0: return "Fighter";
+            case 1: return "Wizard";
+            case 2: return "Rogue";
+            case 3: return "Cleric";
+            default: return "Any";
+        }
+    }
+
+    std::string rarityLabel() const { return rarityName(rarity); }
+    std::string classLabel() const { return classTagName(classTag); }
+
+    bool canEquip(CharacterClass c) const {
+        if (type == ItemType::POTION) return false;
+        if (classTag < 0) return true;
+        return classTag == static_cast<int>(c);
+    }
+
+    int shopCost() const {
+        int rarityMult = 1 + static_cast<int>(rarity);
+        int base = (bonus + 1) * 20 * rarityMult;
+        if (type == ItemType::POTION) return std::max(15, bonus * 3);
+        if (classTag >= 0) base += 10; // class-tagged premium
+        return std::max(15, base);
+    }
+
+    /** Gold to raise this item one upgrade tier (+1 bonus). */
+    int upgradeCost() const {
+        int rarityBase = 15 * (1 + static_cast<int>(rarity));
+        return rarityBase * (upgradeLevel + 1) * (1 + bonus / 2);
+    }
 
     std::string getDescription() const {
         std::stringstream ss;
         ss << name;
         if (bonus != 0) ss << " (+" << bonus << ")";
+        if (upgradeLevel > 0) ss << " [+" << upgradeLevel << "]";
         return ss.str();
+    }
+
+    /** Persist token: name:bonus:W|A|P:rarity:classTag:upgrade */
+    std::string toToken() const {
+        char t = 'W';
+        if (type == ItemType::ARMOR) t = 'A';
+        else if (type == ItemType::POTION) t = 'P';
+        std::stringstream ss;
+        ss << name << ":" << bonus << ":" << t << ":"
+           << static_cast<int>(rarity) << ":" << classTag << ":" << upgradeLevel;
+        return ss.str();
+    }
+
+    static std::shared_ptr<Item> fromToken(const std::string& tok) {
+        if (tok.empty() || tok == "None" || tok.rfind("None:", 0) == 0) return nullptr;
+        // Split on ':'
+        std::vector<std::string> parts;
+        std::string cur;
+        for (char c : tok) {
+            if (c == ':') { parts.push_back(cur); cur.clear(); }
+            else cur.push_back(c);
+        }
+        parts.push_back(cur);
+        if (parts.size() < 3) return nullptr;
+        auto item = std::make_shared<Item>();
+        item->name = parts[0];
+        try { item->bonus = std::stoi(parts[1]); } catch (...) { item->bonus = 0; }
+        char t = parts[2].empty() ? 'W' : parts[2][0];
+        if (t == 'A') item->type = ItemType::ARMOR;
+        else if (t == 'P') item->type = ItemType::POTION;
+        else item->type = ItemType::WEAPON;
+        if (parts.size() >= 4) {
+            try { item->rarity = static_cast<ItemRarity>(std::stoi(parts[3])); } catch (...) {}
+        }
+        if (parts.size() >= 5) {
+            try { item->classTag = std::stoi(parts[4]); } catch (...) { item->classTag = -1; }
+        }
+        if (parts.size() >= 6) {
+            try { item->upgradeLevel = std::stoi(parts[5]); } catch (...) { item->upgradeLevel = 0; }
+        }
+        if (static_cast<int>(item->rarity) < 0 || static_cast<int>(item->rarity) > 3)
+            item->rarity = ItemRarity::COMMON;
+        return item;
+    }
+
+    static std::shared_ptr<Item> make(const std::string& n, ItemType t, int b,
+                                      ItemRarity r = ItemRarity::COMMON, int cls = -1) {
+        auto i = std::make_shared<Item>();
+        i->name = n; i->type = t; i->bonus = b; i->rarity = r; i->classTag = cls;
+        return i;
     }
 };
 
@@ -84,6 +189,7 @@ struct Character {
 
     std::shared_ptr<Item> equippedWeapon;
     std::shared_ptr<Item> equippedArmor;
+    std::vector<std::shared_ptr<Item>> inventory;
 
     Character(std::string n, CharacterClass c, std::string id = "local")
         : name(std::move(n)), uid(std::move(id)), characterClass(c), level(1), xp(0) {
@@ -97,20 +203,26 @@ struct Character {
         applyStatsForLevel();
         currentHp = maxHp;
         resources = maxResources;
-        if (characterClass == CharacterClass::FIGHTER) {
-            equippedWeapon = std::make_shared<Item>(Item{"Longsword", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Chain Shirt", ItemType::ARMOR, 3});
-        } else if (characterClass == CharacterClass::ROGUE) {
-            equippedWeapon = std::make_shared<Item>(Item{"Shortsword", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Leather Armor", ItemType::ARMOR, 1});
-        } else if (characterClass == CharacterClass::WIZARD) {
-            equippedWeapon = std::make_shared<Item>(Item{"Quarterstaff", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Traveler Clothes", ItemType::ARMOR, 0});
-        } else {
-            equippedWeapon = std::make_shared<Item>(Item{"Mace", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Scale Mail", ItemType::ARMOR, 4});
-        }
+        giveStarterGear();
         calculateAC();
+    }
+
+    void giveStarterGear() {
+        inventory.clear();
+        const int cls = static_cast<int>(characterClass);
+        if (characterClass == CharacterClass::FIGHTER) {
+            equippedWeapon = Item::make("Longsword", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+            equippedArmor = Item::make("Chain Shirt", ItemType::ARMOR, 3, ItemRarity::COMMON, cls);
+        } else if (characterClass == CharacterClass::ROGUE) {
+            equippedWeapon = Item::make("Shortsword", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+            equippedArmor = Item::make("Leather Armor", ItemType::ARMOR, 1, ItemRarity::COMMON, cls);
+        } else if (characterClass == CharacterClass::WIZARD) {
+            equippedWeapon = Item::make("Quarterstaff", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+            equippedArmor = Item::make("Traveler Clothes", ItemType::ARMOR, 0, ItemRarity::COMMON, -1);
+        } else {
+            equippedWeapon = Item::make("Mace", ItemType::WEAPON, 0, ItemRarity::COMMON, cls);
+            equippedArmor = Item::make("Scale Mail", ItemType::ARMOR, 4, ItemRarity::COMMON, cls);
+        }
     }
 
     void calculateAC() {
@@ -235,20 +347,31 @@ struct Character {
     /** Hard difficulty: strip gold + equipped gear back to class starters. Stats/level kept. */
     void stripGearAndGoldToStarters() {
         gold = 0;
-        if (characterClass == CharacterClass::FIGHTER) {
-            equippedWeapon = std::make_shared<Item>(Item{"Longsword", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Chain Shirt", ItemType::ARMOR, 3});
-        } else if (characterClass == CharacterClass::ROGUE) {
-            equippedWeapon = std::make_shared<Item>(Item{"Shortsword", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Leather Armor", ItemType::ARMOR, 1});
-        } else if (characterClass == CharacterClass::WIZARD) {
-            equippedWeapon = std::make_shared<Item>(Item{"Quarterstaff", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Traveler Clothes", ItemType::ARMOR, 0});
-        } else {
-            equippedWeapon = std::make_shared<Item>(Item{"Mace", ItemType::WEAPON, 0});
-            equippedArmor = std::make_shared<Item>(Item{"Scale Mail", ItemType::ARMOR, 4});
-        }
+        inventory.clear();
+        giveStarterGear();
         calculateAC();
+    }
+
+    void addToInventory(const std::shared_ptr<Item>& item) {
+        if (item) inventory.push_back(item);
+    }
+
+    bool upgradeOwnedItem(std::shared_ptr<Item>& item, std::string& err) {
+        if (!item || item->type == ItemType::POTION) {
+            err = "Cannot upgrade that.";
+            return false;
+        }
+        int cost = item->upgradeCost();
+        if (gold < cost) {
+            err = "Not enough gold! Need " + std::to_string(cost) + "g.";
+            return false;
+        }
+        gold -= cost;
+        item->bonus += 1;
+        item->upgradeLevel += 1;
+        if (item->type == ItemType::ARMOR) calculateAC();
+        err.clear();
+        return true;
     }
 
     std::string getDetailedSheet() const {
@@ -265,8 +388,9 @@ struct Character {
         ss << "INT: " << attributes.intelligence << " (" << showMod(attributes.intelligence) << ")\n";
         ss << "WIS: " << attributes.wisdom << " (" << showMod(attributes.wisdom) << ")\n";
         ss << "CHA: " << attributes.charisma << " (" << showMod(attributes.charisma) << ")\n";
-        ss << "Weapon: " << (equippedWeapon ? equippedWeapon->getDescription() : "None") << "\n";
-        ss << "Armor: " << (equippedArmor ? equippedArmor->getDescription() : "None") << "\n";
+        ss << "Weapon: " << (equippedWeapon ? equippedWeapon->getDescription() + " [" + equippedWeapon->rarityLabel() + "/" + equippedWeapon->classLabel() + "]" : "None") << "\n";
+        ss << "Armor: " << (equippedArmor ? equippedArmor->getDescription() + " [" + equippedArmor->rarityLabel() + "/" + equippedArmor->classLabel() + "]" : "None") << "\n";
+        ss << "Bag: " << inventory.size() << " item(s)\n";
         return ss.str();
     }
 
@@ -369,16 +493,52 @@ public:
 
 class LootSystem {
 public:
-    static std::shared_ptr<Item> generateLoot(int roomDepth) {
-        int roll = rand() % 100;
-        if (roll > 80) {
-            int bonus = (roomDepth / 5) + 1;
-            return std::make_shared<Item>(Item{"Steel Sword", ItemType::WEAPON, bonus});
-        } else if (roll > 60) {
-            int bonus = (roomDepth / 6) + 1;
-            return std::make_shared<Item>(Item{"Chainmail", ItemType::ARMOR, bonus});
+    /** luckBonus: 0 normal; bosses add 20–50 to favor Rare/Epic. preferClass: optional class tag for gear. */
+    static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0, int preferClass = -1) {
+        int roll = (rand() % 100) + luckBonus;
+        if (roll < 55) return nullptr; // often nothing on normal clears
+
+        ItemRarity rarity = ItemRarity::COMMON;
+        if (roll >= 95) rarity = ItemRarity::EPIC;
+        else if (roll >= 82) rarity = ItemRarity::RARE;
+        else if (roll >= 68) rarity = ItemRarity::UNCOMMON;
+
+        int bonus = (roomDepth / 5) + static_cast<int>(rarity);
+        if (bonus < 0) bonus = 0;
+        bool weapon = (rand() % 2) == 0;
+        int cls = preferClass;
+        if (cls < 0 && (rand() % 100) < 40) cls = rand() % 4; // sometimes class-tagged
+        else if ((rand() % 100) < 45) cls = -1;
+
+        if (weapon) {
+            const char* names[] = {"Steel Blade", "Runed Blade", "Shadow Dirk", "War Maul", "Arcane Wand"};
+            int ni = rand() % 5;
+            if (cls == 0) return Item::make("Champion's Longsword", ItemType::WEAPON, bonus, rarity, 0);
+            if (cls == 1) return Item::make("Focus Staff", ItemType::WEAPON, bonus, rarity, 1);
+            if (cls == 2) return Item::make("Silent Shortsword", ItemType::WEAPON, bonus, rarity, 2);
+            if (cls == 3) return Item::make("Hallowed Mace", ItemType::WEAPON, bonus, rarity, 3);
+            return Item::make(names[ni], ItemType::WEAPON, bonus, rarity, -1);
+        } else {
+            if (cls == 0) return Item::make("Bulwark Mail", ItemType::ARMOR, bonus + 2, rarity, 0);
+            if (cls == 1) return Item::make("Scholar Robes", ItemType::ARMOR, bonus, rarity, 1);
+            if (cls == 2) return Item::make("Shadow Leathers", ItemType::ARMOR, bonus + 1, rarity, 2);
+            if (cls == 3) return Item::make("Temple Vestments", ItemType::ARMOR, bonus + 2, rarity, 3);
+            return Item::make("Reinforced Mail", ItemType::ARMOR, bonus + 1, rarity, -1);
         }
-        return nullptr;
+    }
+
+    static bool isBossName(const std::string& name) {
+        return name.find("Goblin King") != std::string::npos
+            || name.find("Skeleton King") != std::string::npos
+            || name.find("Ashen Drake") != std::string::npos
+            || name.find("Dragon") != std::string::npos;
+    }
+
+    static int bossTier(const std::string& name) {
+        if (name.find("Ashen Drake") != std::string::npos || name.find("Dragon") != std::string::npos) return 3;
+        if (name.find("Skeleton King") != std::string::npos) return 2;
+        if (name.find("Goblin King") != std::string::npos) return 1;
+        return 0;
     }
 };
 

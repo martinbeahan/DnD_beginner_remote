@@ -183,6 +183,11 @@ class MainActivity : AppCompatActivity() {
     external fun doRest()
     external fun doIncreaseStat(playerName: String, statIndex: Int)
     external fun doBuyItem(playerName: String, itemIndex: Int): Boolean
+    external fun getInventoryManifest(playerName: String): String
+    external fun doEquipItem(playerName: String, invIndex: Int): Boolean
+    external fun doUnequipItem(playerName: String, slot: Int): Boolean
+    external fun doUpgradeInventoryItem(playerName: String, invIndex: Int): Boolean
+    external fun doUpgradeEquippedItem(playerName: String, slot: Int): Boolean
     external fun isInCombat(): Boolean
     external fun isRoomCleared(): Boolean
     external fun hasSearchedRoom(): Boolean
@@ -1770,6 +1775,11 @@ class MainActivity : AppCompatActivity() {
             .setView(view)
             .setPositiveButton("Close", null)
             .create()
+        val invBtn = view.findViewById<Button>(R.id.sheetInventory)
+        invBtn.setOnClickListener {
+            dialog.dismiss()
+            showInventoryDialog(forName)
+        }
         levelUpBtn.setOnClickListener {
             dialog.dismiss()
             showStatUpgradeDialog(forName)
@@ -2019,6 +2029,131 @@ class MainActivity : AppCompatActivity() {
         scroll?.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
+    private fun rarityColor(rarity: String): Int {
+        return when (rarity.lowercase()) {
+            "uncommon" -> getColor(R.color.rarity_uncommon)
+            "rare" -> getColor(R.color.rarity_rare)
+            "epic" -> getColor(R.color.rarity_epic)
+            else -> getColor(R.color.rarity_common)
+        }
+    }
+
+    private fun showInventoryDialog(forName: String = localPlayerName) {
+        if (!nativeReady) {
+            Toast.makeText(this, "Native library not loaded — cannot open inventory.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val view = layoutInflater.inflate(R.layout.dialog_inventory, null)
+        val goldTv = view.findViewById<TextView>(R.id.invGoldText)
+        val list = view.findViewById<LinearLayout>(R.id.invItemList)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Inventory — $forName")
+            .setView(view)
+            .setNegativeButton("Close", null)
+            .create()
+
+        fun refresh() {
+            list.removeAllViews()
+            val gold = try {
+                val sheet = getDetailedSheet(forName)
+                Regex("""Gold:\s*(\d+)""").find(sheet)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: parsePlayerGold()
+            } catch (_: Exception) { parsePlayerGold() }
+            goldTv.text = "Gold: ${gold}g"
+            val manifest = try { getInventoryManifest(forName) } catch (_: Exception) { "" }
+            val entries = manifest.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            if (entries.isEmpty()) {
+                val empty = TextView(this).apply {
+                    text = "No gear yet. Visit a merchant or clear rooms for loot."
+                    setTextColor(getColor(R.color.parchment))
+                    textSize = 13f
+                }
+                list.addView(empty)
+                return
+            }
+            for (entry in entries) {
+                // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost
+                val idxPart = entry.substringBefore(':')
+                val rest = entry.substringAfter(':', "")
+                val parts = rest.split('|')
+                if (parts.size < 8) continue
+                val name = parts[0]
+                val bonus = parts[1]
+                val type = parts[2]
+                val rarity = parts[3]
+                val cls = parts[4]
+                val slot = parts[5]
+                val upgLvl = parts[6]
+                val upgCost = parts[7].toIntOrNull() ?: 0
+                val index = idxPart.toIntOrNull() ?: continue
+                val row = layoutInflater.inflate(R.layout.item_inventory_row, list, false)
+                val nameTv = row.findViewById<TextView>(R.id.invItemName)
+                val metaTv = row.findViewById<TextView>(R.id.invItemMeta)
+                val equipBtn = row.findViewById<Button>(R.id.invEquipBtn)
+                val upgBtn = row.findViewById<Button>(R.id.invUpgradeBtn)
+                nameTv.text = "$name (+$bonus)"
+                nameTv.setTextColor(rarityColor(rarity))
+                val slotLabel = when (slot) {
+                    "weapon" -> "Equipped · Weapon"
+                    "armor" -> "Equipped · Armor"
+                    else -> "Bag"
+                }
+                metaTv.text = "$rarity · $cls · $type · $slotLabel · upg $upgLvl"
+                if (slot == "weapon" || slot == "armor") {
+                    equipBtn.text = "Unequip"
+                    equipBtn.setOnClickListener {
+                        val s = if (slot == "weapon") 0 else 1
+                        val ok = try { doUnequipItem(forName, s) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Could not unequip." }, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    upgBtn.text = "Upgrade (${upgCost}g)"
+                    upgBtn.isEnabled = gold >= upgCost && type != "Potion"
+                    upgBtn.setOnClickListener {
+                        val s = if (slot == "weapon") 0 else 1
+                        val ok = try { doUpgradeEquippedItem(forName, s) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Not enough gold!" }, Toast.LENGTH_SHORT).show()
+                            refresh()
+                        }
+                    }
+                } else {
+                    equipBtn.text = "Equip"
+                    equipBtn.setOnClickListener {
+                        val ok = try { doEquipItem(forName, index) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Cannot equip." }, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    upgBtn.text = "Upgrade (${upgCost}g)"
+                    upgBtn.isEnabled = gold >= upgCost && type != "Potion"
+                    upgBtn.setOnClickListener {
+                        val ok = try { doUpgradeInventoryItem(forName, index) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Not enough gold!" }, Toast.LENGTH_SHORT).show()
+                            refresh()
+                        }
+                    }
+                }
+                list.addView(row)
+            }
+        }
+        refresh()
+        dialog.show()
+    }
+
     private fun showShopDialog() {
         if (!nativeReady) {
             Toast.makeText(this, "Native library not loaded — cannot open shop.", Toast.LENGTH_SHORT).show()
@@ -2029,7 +2164,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "The merchant has nothing for sale.", Toast.LENGTH_SHORT).show()
             return
         }
-        // C++ format: "0:Steel Blade (25g);1:Platemail (25g);..."
+        // C++ format: "0:name|bonus|type|rarity|class|cost;..."
         val entries = manifest.split(';').map { it.trim() }.filter { it.isNotEmpty() }
         if (entries.isEmpty()) {
             Toast.makeText(this, "The merchant has nothing for sale.", Toast.LENGTH_SHORT).show()
@@ -2045,51 +2180,72 @@ class MainActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Merchant")
             .setView(view)
+            .setNeutralButton("Inventory") { _, _ -> showInventoryDialog(localPlayerName) }
             .setNegativeButton("Leave", null)
             .create()
-        for (entry in entries) {
-            val index = entry.substringBefore(':').toIntOrNull() ?: continue
-            val label = entry.substringAfter(':', entry)
-            val cost = Regex("""\((\d+)g\)""").find(label)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-            val name = label.replace(Regex("""\s*\(\d+g\)\s*$"""), "").trim()
-            val row = layoutInflater.inflate(R.layout.item_shop_row, list, false)
-            row.findViewById<TextView>(R.id.shopItemName).text = name
-            row.findViewById<TextView>(R.id.shopItemCost).text = "${cost}g"
-            val buy = row.findViewById<Button>(R.id.shopBuyBtn)
-            fun updateBuyEnabled() {
-                buy.isEnabled = parsePlayerGold() >= cost
-            }
-            updateBuyEnabled()
-            buy.setOnClickListener {
-                if (isOnlineClient) {
-                    performOrQueue("buy", index) { }
-                    dialog.dismiss()
-                    return@setOnClickListener
-                }
-                val ok = try { doBuyItem(localPlayerName, index) } catch (_: Exception) { false }
-                val ev = try { getLastEvent() } catch (_: Exception) { "" }
-                if (ok) {
-                    syncAndSave()
-                    appendCombatFeed(ev.ifBlank { "Bought $name." })
-                    refreshGold()
-                    updateBuyEnabled()
-                    // refresh all buy buttons
-                    for (i in 0 until list.childCount) {
-                        val r = list.getChildAt(i)
-                        val b = r.findViewById<Button>(R.id.shopBuyBtn) ?: continue
-                        val cTxt = r.findViewById<TextView>(R.id.shopItemCost)?.text?.toString().orEmpty()
-                        val c = cTxt.removeSuffix("g").toIntOrNull() ?: 0
-                        b.isEnabled = parsePlayerGold() >= c
-                    }
-                    updateUi()
+
+        fun rebuild() {
+            list.removeAllViews()
+            val m2 = try { getShopManifest() } catch (_: Exception) { "" }
+            val ents = m2.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            refreshGold()
+            for (entry in ents) {
+                val index = entry.substringBefore(':').toIntOrNull() ?: continue
+                val rest = entry.substringAfter(':', "")
+                val parts = rest.split('|')
+                val name: String
+                val cost: Int
+                val rarity: String
+                val cls: String
+                val type: String
+                val bonus: String
+                if (parts.size >= 6) {
+                    name = parts[0]
+                    bonus = parts[1]
+                    type = parts[2]
+                    rarity = parts[3]
+                    cls = parts[4]
+                    cost = parts[5].toIntOrNull() ?: 0
                 } else {
-                    appendCombatFeed(ev.ifBlank { "Could not buy that." })
-                    Toast.makeText(this, ev.ifBlank { "Could not buy that." }, Toast.LENGTH_SHORT).show()
-                    refreshGold()
+                    // Legacy fallback: "Name (25g)"
+                    val label = rest
+                    cost = Regex("""\((\d+)g\)""").find(label)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+                    name = label.replace(Regex("""\s*\(\d+g\)\s*$"""), "").trim()
+                    rarity = "Common"; cls = "Any"; type = "Item"; bonus = "0"
                 }
+                val row = layoutInflater.inflate(R.layout.item_shop_row, list, false)
+                val nameTv = row.findViewById<TextView>(R.id.shopItemName)
+                nameTv.text = "$name (+$bonus) · $type"
+                nameTv.setTextColor(rarityColor(rarity))
+                row.findViewById<TextView>(R.id.shopItemCost).text = "$rarity · $cls · ${cost}g"
+                val buy = row.findViewById<Button>(R.id.shopBuyBtn)
+                fun updateBuyEnabled() {
+                    buy.isEnabled = parsePlayerGold() >= cost
+                }
+                updateBuyEnabled()
+                buy.setOnClickListener {
+                    if (isOnlineClient) {
+                        performOrQueue("buy", index) { }
+                        dialog.dismiss()
+                        return@setOnClickListener
+                    }
+                    val ok = try { doBuyItem(localPlayerName, index) } catch (_: Exception) { false }
+                    val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                    if (ok) {
+                        syncAndSave()
+                        appendCombatFeed(ev.ifBlank { "Bought $name." })
+                        rebuild()
+                        updateUi()
+                    } else {
+                        appendCombatFeed(ev.ifBlank { "Could not buy that." })
+                        Toast.makeText(this, ev.ifBlank { "Could not buy that." }, Toast.LENGTH_SHORT).show()
+                        refreshGold()
+                    }
+                }
+                list.addView(row)
             }
-            list.addView(row)
         }
+        rebuild()
         dialog.show()
     }
 
@@ -2351,9 +2507,11 @@ class MainActivity : AppCompatActivity() {
         if (!unit.isPlayer) {
             val n = unit.name.lowercase()
             return when {
-                n.contains("skeleton") -> R.drawable.sprite_skeleton
+                n.contains("ashen drake") || n.contains("dragon") -> R.drawable.sprite_ogre
+                n.contains("skeleton king") || n.contains("skeleton") -> R.drawable.sprite_skeleton
                 n.contains("wolf") -> R.drawable.sprite_wolf
                 n.contains("ogre") || n.contains("collector") -> R.drawable.sprite_ogre
+                n.contains("goblin king") || n.contains("goblin") -> R.drawable.sprite_goblin
                 else -> R.drawable.sprite_goblin
             }
         }

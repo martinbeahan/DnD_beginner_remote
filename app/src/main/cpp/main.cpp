@@ -241,6 +241,53 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_doBuyItem(JNIEnv *env, jobject 
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_getInventoryManifest(JNIEnv *env, jobject thiz, jstring playerName) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    std::string out = g_Game.getInventoryManifest(nativeName ? nativeName : "");
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return env->NewStringUTF(out.c_str());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doEquipItem(JNIEnv *env, jobject thiz, jstring playerName, jint invIndex) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.equipInventoryItem(nativeName ? nativeName : "", invIndex);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doUnequipItem(JNIEnv *env, jobject thiz, jstring playerName, jint slot) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.unequipSlot(nativeName ? nativeName : "", slot);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doUpgradeInventoryItem(JNIEnv *env, jobject thiz, jstring playerName, jint invIndex) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.upgradeInventoryItem(nativeName ? nativeName : "", invIndex);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doUpgradeEquippedItem(JNIEnv *env, jobject thiz, jstring playerName, jint slot) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.upgradeEquippedItem(nativeName ? nativeName : "", slot);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+
+
 JNIEXPORT void JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_setHost(JNIEnv *env, jobject thiz, jboolean isHost) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
