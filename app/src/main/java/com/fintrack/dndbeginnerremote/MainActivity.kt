@@ -1275,11 +1275,12 @@ class MainActivity : AppCompatActivity() {
         settingsAboutText.text =
             getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
                 "\n\nCompatible with 5e SRD (SRD 5.1, CC-BY 4.0). Not an official D&D product. " +
-                "See ATTRIBUTION.md.\n\nArt (CC0): LuizMelo idle/attack frames; Nidhoggn battlebacks " +
-                "(Act 2 + crawl variety); ansimuz Phantasy dungeon; quantumelle Dark forest path; " +
-                "Clint Bellanger Tiny Creatures (ogre).\n\nAudio (CC0): Ironchest Dungeon Loops (explore + tension BGM); " +
-                "StarNinjas sword/clash SFX; Darsycho monster snarl; bart interface beep. " +
-                "DM voice uses on-device Text-to-Speech (no third-party voices)."
+                "See ATTRIBUTION.md.\n\nArt (CC0): LuizMelo idle/attack frames (crisper v2.5); " +
+                "Nidhoggn battlebacks (higher-quality stages + boss room); ansimuz Phantasy dungeon; " +
+                "quantumelle Dark forest path; Clint Bellanger Tiny Creatures (ogre).\n\nAudio (CC0): " +
+                "Ironchest Dungeon Loops (explore + tension BGM); StarNinjas sword/clash SFX; " +
+                "Darsycho monster snarl; bart interface beep. DM voice uses on-device Text-to-Speech " +
+                "(no third-party voices)."
         settingsRoot.visibility = View.VISIBLE
         settingsRoot.bringToFront()
     }
@@ -2668,6 +2669,10 @@ class MainActivity : AppCompatActivity() {
         val room = try { getRoomDescription() } catch (_: Exception) { "" }
         val blob = (status + "\n" + room).lowercase()
         val res = when {
+            // Boss rooms (Ashen Drake / kings / named boss beats)
+            blob.contains("ashen drake") || blob.contains("goblin king") ||
+                blob.contains("skeleton king") || blob.contains("boss") ->
+                R.drawable.bg_battle_stage_boss
             // Act 2 — Millhollow's Debt
             blob.contains("millrace") || blob.contains("weir") ->
                 R.drawable.bg_battle_stage_weir
@@ -2748,14 +2753,14 @@ class MainActivity : AppCompatActivity() {
     ) {
         column.removeAllViews()
         val density = resources.displayMetrics.density
-        val spriteSize = (108 * density).toInt()
-        val barW = (88 * density).toInt()
-        val barH = (10 * density).toInt()
+        val spriteSize = (112 * density).toInt()
+        val barW = (96 * density).toInt()
+        val barH = (12 * density).toInt()
         units.forEachIndexed { index, unit ->
             val wrap = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = if (alignEnd) Gravity.END else Gravity.START
-                setPadding(6, 6, 6, 6)
+                setPadding(4, 4, 4, 4)
                 tag = unit.name
             }
             val idleRes = spriteFor(unit)
@@ -2765,7 +2770,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(spriteSize, spriteSize)
                 adjustViewBounds = true
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                setPadding(6, 6, 6, 6)
+                setPadding(4, 4, 4, 4)
                 background = getDrawable(R.drawable.bg_portrait_frame)
                 tag = "sprite"
                 // Party on left faces right (native); foes on right face left toward the party.
@@ -2774,10 +2779,12 @@ class MainActivity : AppCompatActivity() {
             }
             val name = TextView(this).apply {
                 text = unit.name
-                setTextColor(Color.parseColor("#FFE8D5A3"))
-                textSize = 12f
+                setTextColor(Color.parseColor("#FFFFE08A"))
+                textSize = 11f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setShadowLayer(2f * density, 0f, 1f * density, Color.BLACK)
                 gravity = if (alignEnd) Gravity.END else Gravity.START
+                maxLines = 1
             }
             val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
                 max = unit.maxHp.coerceAtLeast(1)
@@ -2790,8 +2797,9 @@ class MainActivity : AppCompatActivity() {
             }
             val hp = TextView(this).apply {
                 text = "${unit.hp}/${unit.maxHp}"
-                setTextColor(Color.parseColor("#FFB0A090"))
+                setTextColor(Color.parseColor("#FFC4A574"))
                 textSize = 10f
+                setShadowLayer(1.5f * density, 0f, 1f * density, Color.BLACK)
                 gravity = if (alignEnd) Gravity.END else Gravity.START
             }
             wrap.addView(img)
@@ -2864,8 +2872,8 @@ class MainActivity : AppCompatActivity() {
             val child = column.getChildAt(i)
             val img = child.findViewWithTag<ImageView?>("sprite") ?: continue
             if (img.alpha < 0.5f) continue
-            val anim = AlphaAnimation(0.45f, 1f).apply {
-                duration = 550
+            val anim = AlphaAnimation(0.40f, 1f).apply {
+                duration = 480
                 repeatMode = Animation.REVERSE
                 repeatCount = Animation.INFINITE
             }
@@ -2949,7 +2957,7 @@ class MainActivity : AppCompatActivity() {
                     flashHit(d, critical)
                     val baseSx = d.scaleX.let { if (it == 0f) facing else it.coerceIn(-2f, 2f) }
                     val sign = if (baseSx < 0f) -1f else 1f
-                    val impact = if (critical) 1.42f else 1.24f
+                    val impact = if (critical) 1.48f else 1.26f
                     d.animate().cancel()
                     d.animate()
                         .scaleX(sign * impact).scaleY(impact)
@@ -2973,24 +2981,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun flashHit(target: ImageView, critical: Boolean) {
-        val flash = if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFF6655")
+        val flash = if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFF5544")
         target.setColorFilter(flash, android.graphics.PorterDuff.Mode.SRC_ATOP)
         target.animate().cancel()
         handler.postDelayed({
             target.clearColorFilter()
-        }, if (critical) 180L else 120L)
+        }, if (critical) 220L else 140L)
     }
 
     private fun flashScreen(critical: Boolean) {
         val overlay = combatFlashOverlay ?: return
-        val color = if (critical) Color.parseColor("#AAFFE08A") else Color.parseColor("#66FF4433")
+        val color = if (critical) Color.parseColor("#BBFFE08A") else Color.parseColor("#77FF4433")
         overlay.setBackgroundColor(color)
         overlay.visibility = View.VISIBLE
-        overlay.alpha = if (critical) 0.85f else 0.55f
+        overlay.alpha = if (critical) 0.9f else 0.6f
         overlay.animate().cancel()
         overlay.animate()
             .alpha(0f)
-            .setDuration(if (critical) 280L else 180L)
+            .setDuration(if (critical) 320L else 200L)
             .withEndAction {
                 overlay.visibility = View.GONE
                 overlay.alpha = 1f
@@ -3008,11 +3016,13 @@ class MainActivity : AppCompatActivity() {
         anchor.getLocationOnScreen(locAnchor)
         val tv = TextView(this).apply {
             text = if (critical) "CRIT $amount" else "-$amount"
-            setTextColor(if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFFEEEE"))
-            textSize = if (critical) 22f else 18f
+            setTextColor(if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFFF5F0"))
+            textSize = if (critical) 24f else 18f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setShadowLayer(4f * density, 0f, 0f, Color.BLACK)
-            background = getDrawable(R.drawable.bg_damage_float)
+            setShadowLayer(5f * density, 0f, 1f * density, Color.BLACK)
+            background = getDrawable(
+                if (critical) R.drawable.bg_damage_float_crit else R.drawable.bg_damage_float
+            )
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             isClickable = false
             isFocusable = false
@@ -3022,18 +3032,18 @@ class MainActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
         host.addView(tv, lp)
-        val maxX = (host.width - 48).coerceAtLeast(0).toFloat()
-        tv.x = (locAnchor[0] - locHost[0] + anchor.width / 4f).coerceIn(0f, maxX)
+        val maxX = (host.width - 56).coerceAtLeast(0).toFloat()
+        tv.x = (locAnchor[0] - locHost[0] + anchor.width / 5f).coerceIn(0f, maxX)
         tv.y = (locAnchor[1] - locHost[1]).toFloat().coerceAtLeast(0f)
         tv.alpha = 1f
-        tv.scaleX = if (critical) 1.15f else 1f
+        tv.scaleX = if (critical) 1.2f else 1f
         tv.scaleY = tv.scaleX
         tv.animate()
-            .translationY(-72f * density)
+            .translationY(if (critical) -88f * density else -68f * density)
             .alpha(0f)
-            .scaleX(if (critical) 1.35f else 1.1f)
-            .scaleY(if (critical) 1.35f else 1.1f)
-            .setDuration(if (critical) 900L else 700L)
+            .scaleX(if (critical) 1.45f else 1.12f)
+            .scaleY(if (critical) 1.45f else 1.12f)
+            .setDuration(if (critical) 980L else 720L)
             .withEndAction {
                 host.removeView(tv)
             }

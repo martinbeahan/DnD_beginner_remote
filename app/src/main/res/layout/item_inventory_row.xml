@@ -5,7 +5,7 @@
     android:orientation="vertical"
     android:background="@drawable/bg_shop_row"
     android:padding="10dp"
-    android:layout_marginBottom="8dp">
+    android:layout_marginBottom="6dp">
 
     <TextView
         android:id="@+id/invItemName"
@@ -13,7 +13,7 @@
         android:layout_height="wrap_content"
         android:textColor="@color/parchment"
         android:textStyle="bold"
-        android:textSize="14sp"
+        android:textSize="13sp"
         android:maxLines="2"
         android:ellipsize="end" />
 
@@ -22,57 +22,64 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textColor="@color/parchment_dark"
-        android:textSize="12sp"
+        android:textSize="11sp"
         android:layout_marginTop="2dp" />
 
-    <LinearLayout
+    <!-- Horizontal scroll keeps Equip/Upgrade/Transfer/Sell usable on S20 -->
+    <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:layout_marginTop="6dp"
-        android:gravity="end">
-
-        <Button
-            android:id="@+id/invEquipBtn"
-            style="@style/Widget.DnD.ActionButton"
+        android:scrollbars="none"
+        android:fadeScrollbars="true">
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="72dp"
-            android:minHeight="44dp"
-            android:text="Equip"
-            android:textSize="11sp"
-            android:layout_marginEnd="6dp" />
+            android:orientation="horizontal"
+            android:gravity="end">
 
-        <Button
-            android:id="@+id/invUpgradeBtn"
-            style="@style/Widget.DnD.ActionButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="96dp"
-            android:minHeight="44dp"
-            android:text="Upgrade"
-            android:textSize="11sp"
-            android:layout_marginEnd="6dp" />
+            <Button
+                android:id="@+id/invEquipBtn"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="68dp"
+                android:minHeight="42dp"
+                android:text="Equip"
+                android:textSize="11sp"
+                android:layout_marginEnd="5dp" />
 
-        <Button
-            android:id="@+id/invTransferBtn"
-            style="@style/Widget.DnD.ActionButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="88dp"
-            android:minHeight="44dp"
-            android:text="Transfer"
-            android:textSize="11sp"
-            android:layout_marginEnd="6dp" />
+            <Button
+                android:id="@+id/invUpgradeBtn"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="88dp"
+                android:minHeight="42dp"
+                android:text="Upgrade"
+                android:textSize="11sp"
+                android:layout_marginEnd="5dp" />
 
-        <Button
-            android:id="@+id/invSellBtn"
-            style="@style/Widget.DnD.ActionButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="88dp"
-            android:minHeight="44dp"
-            android:text="Sell"
-            android:textSize="11sp" />
-    </LinearLayout>
+            <Button
+                android:id="@+id/invTransferBtn"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="80dp"
+                android:minHeight="42dp"
+                android:text="Transfer"
+                android:textSize="11sp"
+                android:layout_marginEnd="5dp" />
+
+            <Button
+                android:id="@+id/invSellBtn"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="68dp"
+                android:minHeight="42dp"
+                android:text="Sell"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </HorizontalScrollView>
 </LinearLayout>

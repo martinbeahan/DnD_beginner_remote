@@ -3,9 +3,9 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/dungeon_bg"
-    android:padding="8dp">
+    android:padding="6dp">
 
-    <!-- Slim top HUD -->
+    <!-- Slim production HUD -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -13,28 +13,37 @@
         android:layout_alignParentTop="true"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="@drawable/bg_dungeon_panel"
-        android:padding="8dp">
+        android:background="@drawable/bg_hud_panel"
+        android:paddingStart="10dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:layout_marginEnd="4dp">
 
             <TextView
                 android:id="@+id/turnBanner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:background="@drawable/bg_turn_banner"
                 android:text="Your turn"
-                android:textColor="@color/gold"
+                android:textColor="@color/gold_bright"
                 android:textStyle="bold"
-                android:textSize="15sp" />
+                android:textSize="14sp"
+                android:letterSpacing="0.02"
+                android:maxLines="1"
+                android:ellipsize="end" />
 
             <TextView
                 android:id="@+id/playerStatusText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
                 android:text="Room 1"
                 android:textColor="@color/parchment"
                 android:textSize="11sp"
@@ -63,7 +72,7 @@
                     android:id="@+id/hudXpBar"
                     style="?android:attr/progressBarStyleHorizontal"
                     android:layout_width="0dp"
-                    android:layout_height="10dp"
+                    android:layout_height="11dp"
                     android:layout_weight="1"
                     android:max="100"
                     android:progress="0"
@@ -74,7 +83,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0/100"
-                    android:textColor="@color/parchment"
+                    android:textColor="@color/parchment_dark"
                     android:textSize="10sp"
                     android:layout_marginStart="6dp" />
             </LinearLayout>
@@ -82,57 +91,47 @@
 
         <Button
             android:id="@+id/btnJournal"
-            style="@style/Widget.DnD.ActionButton"
+            style="@style/Widget.DnD.HudChip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="0dp"
             android:text="Log"
-            android:textSize="11sp"
             android:maxLines="1" />
 
         <Button
             android:id="@+id/btnSheet"
-            style="@style/Widget.DnD.ActionButton"
+            style="@style/Widget.DnD.HudChip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="3dp"
             android:text="Sheet"
-            android:textSize="11sp"
             android:maxLines="1" />
 
         <Button
             android:id="@+id/btnCompanion"
-            style="@style/Widget.DnD.ActionButton"
+            style="@style/Widget.DnD.HudChip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="3dp"
             android:text="Ally"
-            android:textSize="11sp"
             android:maxLines="1"
             android:contentDescription="Companion" />
 
         <Button
             android:id="@+id/btnHelp"
-            style="@style/Widget.DnD.ActionButton"
+            style="@style/Widget.DnD.HudChip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="3dp"
             android:text="?"
-            android:textSize="11sp"
             android:maxLines="1" />
 
         <Button
             android:id="@+id/btnInGameSettings"
-            style="@style/Widget.DnD.ActionButton"
+            style="@style/Widget.DnD.HudChip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="3dp"
             android:text="⚙"
-            android:textSize="11sp"
             android:maxLines="1"
             android:contentDescription="Settings" />
     </LinearLayout>
@@ -143,14 +142,18 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/topBar"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="6dp"
         android:background="@drawable/bg_parchment"
-        android:padding="10dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
         android:text="The torchlight flickers…"
         android:textColor="@color/ink"
         android:textSize="13sp"
         android:fontFamily="serif"
         android:textStyle="italic"
+        android:lineSpacingExtra="1dp"
         android:maxLines="3"
         android:ellipsize="end" />
 
@@ -161,15 +164,15 @@
         android:layout_height="match_parent"
         android:layout_below="@id/roomDescText"
         android:layout_above="@id/bottomControls"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp">
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="6dp">
 
         <LinearLayout
             android:id="@+id/battleArena"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:padding="12dp"
+            android:padding="10dp"
             android:gravity="center"
             android:background="@drawable/bg_battle_stage"
             android:clipChildren="false"
@@ -188,9 +191,11 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="VS"
-                android:textSize="22sp"
-                android:textColor="@color/gold"
-                android:padding="6dp" />
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/gold_bright"
+                android:letterSpacing="0.08"
+                android:padding="4dp" />
 
             <LinearLayout
                 android:id="@+id/enemyColumn"
@@ -229,17 +234,20 @@
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:orientation="vertical"
-        android:background="@drawable/bg_dungeon_panel"
-        android:padding="8dp">
+        android:background="@drawable/bg_hud_panel"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
 
         <ScrollView
             android:id="@+id/combatLogScroll"
             android:layout_width="match_parent"
-            android:layout_height="72dp"
+            android:layout_height="64dp"
             android:fillViewport="true"
             android:scrollbars="vertical"
             android:fadeScrollbars="false"
-            android:paddingBottom="6dp">
+            android:paddingBottom="4dp">
             <TextView
                 android:id="@+id/combatLogText"
                 android:layout_width="match_parent"
@@ -277,58 +285,60 @@
         <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scrollbars="none">
+            android:scrollbars="none"
+            android:fadeScrollbars="true">
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center">
+                android:gravity="center"
+                android:paddingTop="2dp">
 
                 <Button
                     android:id="@+id/btnAttack"
                     style="@style/Widget.DnD.ActionButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="64dp"
+                    android:minWidth="68dp"
                     android:text="⚔&#10;Attack"
                     android:textSize="11sp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
                 <Button
                     android:id="@+id/btnSpecial"
                     style="@style/Widget.DnD.ActionButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="64dp"
+                    android:minWidth="68dp"
                     android:text="✦&#10;Special"
                     android:textSize="11sp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
                 <Button
                     android:id="@+id/btnHeal"
                     style="@style/Widget.DnD.ActionButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="64dp"
+                    android:minWidth="68dp"
                     android:text="⚗&#10;Potion"
                     android:textSize="11sp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
                 <Button
                     android:id="@+id/btnInteract"
                     style="@style/Widget.DnD.ActionButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="64dp"
+                    android:minWidth="68dp"
                     android:text="🔍&#10;Search"
                     android:textSize="11sp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
                 <Button
                     android:id="@+id/btnRest"
                     style="@style/Widget.DnD.ActionButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="64dp"
+                    android:minWidth="68dp"
                     android:text="🌙&#10;Rest"
                     android:textSize="11sp"
-                    android:layout_marginEnd="6dp" />
+                    android:layout_marginEnd="5dp" />
                 <Button
                     android:id="@+id/btnReset"
                     style="@style/Widget.DnD.ActionButton"

@@ -8,15 +8,22 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFF5F0E6</color>
 
-    <color name="dungeon_bg">#FF1A1410</color>
-    <color name="dungeon_panel">#E62A2118</color>
+    <color name="dungeon_bg">#FF14100C</color>
+    <color name="dungeon_panel">#F02A2118</color>
     <color name="parchment">#FFE8D5A3</color>
     <color name="parchment_dark">#FFC4A574</color>
     <color name="ink">#FF2C1810</color>
     <color name="gold">#FFE0C060</color>
+    <color name="gold_bright">#FFFFE08A</color>
+    <color name="gold_dim">#99C9A227</color>
     <color name="blood">#FF8B1E1E</color>
     <color name="hp_fill">#FF2E7D32</color>
+    <color name="hp_fill_hi">#FF7CF0A0</color>
+    <color name="hp_fill_mid">#FF3DCC6A</color>
+    <color name="hp_fill_lo">#FFC62828</color>
     <color name="stone">#FF3A322C</color>
+    <color name="panel_inner">#CC1A1410</color>
+    <color name="hud_scrim">#E61A1410</color>
 
     <color name="rarity_common">#FFB0B0B0</color>
     <color name="rarity_uncommon">#FF4CAF50</color>
