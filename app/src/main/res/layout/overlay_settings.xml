@@ -96,6 +96,22 @@
                 style="@style/Text.DnD.SectionLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="Accessibility" />
+
+            <CheckBox
+                android:id="@+id/chkReduceFlash"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="44dp"
+                android:text="Reduce flashing (photosensitive-friendly)"
+                android:textColor="@color/parchment"
+                android:buttonTint="@color/gold"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                style="@style/Text.DnD.SectionLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:text="Run" />
 
             <TextView

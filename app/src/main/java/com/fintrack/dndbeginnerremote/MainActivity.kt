@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chkMusic: CheckBox
     private lateinit var chkSfx: CheckBox
     private lateinit var chkDmVoice: CheckBox
+    private lateinit var chkReduceFlash: CheckBox
     private lateinit var btnSettingsTutorial: Button
     private lateinit var btnSettingsAbandon: Button
     private lateinit var btnSettingsReturnMenu: Button
@@ -108,6 +109,8 @@ class MainActivity : AppCompatActivity() {
     private var musicEnabled = true
     private var sfxEnabled = true
     private var dmVoiceEnabled = false
+    /** Softens/disables full-screen flashes & rapid opacity strobes (photosensitive-friendly). Default OFF. */
+    private var reduceFlashEnabled = false
     private var gameAudio: GameAudio? = null
     private var lastCombatMusicState: Boolean? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -397,6 +400,7 @@ class MainActivity : AppCompatActivity() {
         musicEnabled = prefs().getBoolean("pref_music_enabled", true)
         sfxEnabled = prefs().getBoolean("pref_sfx_enabled", true)
         dmVoiceEnabled = prefs().getBoolean("pref_dm_voice_enabled", false)
+        reduceFlashEnabled = prefs().getBoolean("pref_reduce_flash", false)
         preferredDifficulty = prefs().getInt("pref_difficulty", 0).coerceIn(0, 3)
         gameAudio = GameAudio(this).also {
             it.start(musicEnabled, sfxEnabled, dmVoiceEnabled)
@@ -1169,6 +1173,7 @@ class MainActivity : AppCompatActivity() {
         chkMusic = findViewById(R.id.chkMusic)
         chkSfx = findViewById(R.id.chkSfx)
         chkDmVoice = findViewById(R.id.chkDmVoice)
+        chkReduceFlash = findViewById(R.id.chkReduceFlash)
         btnSettingsTutorial = findViewById(R.id.btnSettingsTutorial)
         btnSettingsReturnMenu = findViewById(R.id.btnSettingsReturnMenu)
         btnSettingsBossRaid = findViewById(R.id.btnSettingsBossRaid)
@@ -1247,6 +1252,19 @@ class MainActivity : AppCompatActivity() {
             prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
             gameAudio?.setDmVoiceEnabled(checked)
         }
+        chkReduceFlash.setOnCheckedChangeListener { _, checked ->
+            reduceFlashEnabled = checked
+            prefs().edit().putBoolean("pref_reduce_flash", checked).apply()
+            if (checked) {
+                // Stop any in-flight opacity strobes immediately.
+                sheetPulseAnimator?.cancel()
+                if (::btnSheet.isInitialized) btnSheet.alpha = 1f
+                stopTargetPulse()
+                combatFlashOverlay?.animate()?.cancel()
+                combatFlashOverlay?.visibility = View.GONE
+                combatFlashOverlay?.alpha = 1f
+            }
+        }
         btnSettingsTutorial.setOnClickListener {
             hideSettingsOverlay()
             showTutorial(0) {}
@@ -1266,10 +1284,12 @@ class MainActivity : AppCompatActivity() {
         chkMusic.setOnCheckedChangeListener(null)
         chkSfx.setOnCheckedChangeListener(null)
         chkDmVoice.setOnCheckedChangeListener(null)
+        chkReduceFlash.setOnCheckedChangeListener(null)
         chkBeginnerTips.isChecked = soloCoachEnabled
         chkMusic.isChecked = musicEnabled
         chkSfx.isChecked = sfxEnabled
         chkDmVoice.isChecked = dmVoiceEnabled
+        chkReduceFlash.isChecked = reduceFlashEnabled
         chkBeginnerTips.setOnCheckedChangeListener { _, checked ->
             soloCoachEnabled = checked
             prefs().edit().putBoolean("solo_coach_enabled", checked).apply()
@@ -1289,6 +1309,18 @@ class MainActivity : AppCompatActivity() {
             dmVoiceEnabled = checked
             prefs().edit().putBoolean("pref_dm_voice_enabled", checked).apply()
             gameAudio?.setDmVoiceEnabled(checked)
+        }
+        chkReduceFlash.setOnCheckedChangeListener { _, checked ->
+            reduceFlashEnabled = checked
+            prefs().edit().putBoolean("pref_reduce_flash", checked).apply()
+            if (checked) {
+                sheetPulseAnimator?.cancel()
+                if (::btnSheet.isInitialized) btnSheet.alpha = 1f
+                stopTargetPulse()
+                combatFlashOverlay?.animate()?.cancel()
+                combatFlashOverlay?.visibility = View.GONE
+                combatFlashOverlay?.alpha = 1f
+            }
         }
         btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
         btnSettingsReturnMenu.visibility = if (sessionActive) View.VISIBLE else View.GONE
@@ -1808,7 +1840,11 @@ class MainActivity : AppCompatActivity() {
         if (active) {
             btnSheet.text = "Sheet!"
             btnSheet.setTextColor(getColor(R.color.gold))
-            if (sheetPulseAnimator == null) {
+            if (reduceFlashEnabled) {
+                // Soft highlight only — no rapid opacity pulse.
+                sheetPulseAnimator?.cancel()
+                btnSheet.alpha = 1f
+            } else if (sheetPulseAnimator == null) {
                 sheetPulseAnimator = android.animation.ObjectAnimator.ofFloat(btnSheet, "alpha", 1f, 0.45f).apply {
                     duration = 650
                     repeatMode = android.animation.ValueAnimator.REVERSE
@@ -3162,6 +3198,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startTargetPulse(column: LinearLayout) {
         stopTargetPulse()
+        // Photosensitive mode: keep static selection glow only (no rapid alpha blink).
+        if (reduceFlashEnabled) return
         for (i in 0 until column.childCount) {
             val child = column.getChildAt(i)
             val img = child.findViewWithTag<ImageView?>("sprite") ?: continue
@@ -3275,6 +3313,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun flashHit(target: ImageView, critical: Boolean) {
+        if (reduceFlashEnabled) {
+            // Gentle brief tint — no hard white/red blink.
+            val soft = if (critical) Color.parseColor("#66C9A84A") else Color.parseColor("#55AA5533")
+            target.setColorFilter(soft, android.graphics.PorterDuff.Mode.SRC_ATOP)
+            target.animate().cancel()
+            handler.postDelayed({ target.clearColorFilter() }, 280L)
+            return
+        }
         val flash = if (critical) Color.parseColor("#FFFFE08A") else Color.parseColor("#FFFF5544")
         target.setColorFilter(flash, android.graphics.PorterDuff.Mode.SRC_ATOP)
         target.animate().cancel()
@@ -3284,6 +3330,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun flashScreen(critical: Boolean) {
+        // Full-screen white/red/gold pulses are the highest photosensitivity risk.
+        if (reduceFlashEnabled) return
         val overlay = combatFlashOverlay ?: return
         val color = if (critical) Color.parseColor("#BBFFE08A") else Color.parseColor("#77FF4433")
         overlay.setBackgroundColor(color)
