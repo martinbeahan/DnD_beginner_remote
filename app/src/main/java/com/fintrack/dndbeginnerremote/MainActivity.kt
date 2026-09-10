@@ -227,6 +227,8 @@ class MainActivity : AppCompatActivity() {
     external fun getSoloPlayMode(): Int
     external fun isStoryFullyComplete(): Boolean
     external fun consumePendingRaidKeyDrop(): Boolean
+    external fun beginBossRaidFromCurrent(): Boolean
+    external fun finishBossRaidKeepParty()
     external fun recoverFromPartyWipe(): Boolean
     external fun startDmSession(dmName: String)
     external fun dmBeginDungeon()
@@ -909,6 +911,11 @@ class MainActivity : AppCompatActivity() {
             }
             lastBattleRoster = ""
             refreshBattleArena()
+            // Raid victory / finishBossRaidKeepParty leaves soloPlayMode != RAID.
+            if (prefs().getBoolean("raid_active", false)) {
+                val mode = try { getSoloPlayMode() } catch (_: Exception) { 2 }
+                if (mode != 2) clearRaidSessionFlags()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "syncAndSave failed", e)
         }
@@ -1410,6 +1417,7 @@ class MainActivity : AppCompatActivity() {
             prefs().edit().putBoolean("crash_guard", false).apply()
             runDifficulty = -1
             wipeDialogShowing = false
+            clearRaidSessionFlags()
             Toast.makeText(this, "Progress saved.", Toast.LENGTH_SHORT).show()
             showStartDialog()
         }
@@ -1444,14 +1452,14 @@ class MainActivity : AppCompatActivity() {
         settingsRaidHint.text = when {
             !storyDone -> "Finish the story first (Acts 1–3)"
             keys <= 0 -> "Need a Raid Key (endgame bosses; max 2/day)"
-            else -> "Costs 1 key · saves adventure, then opens Boss Raid from the menu"
+            else -> "Costs 1 key · continues your saved hero into the raid boss"
         }
     }
 
-    /** Shared Boss Raid entry — preserves story/raid key gates. */
+    /** Shared Boss Raid entry — loads the saved story hero, then spawns the raid boss. */
     private fun promptBossRaidEntry(fromInAdventure: Boolean) {
         // From an active adventure: save + park on main menu first so Continue/gear stay
-        // intact if the player cancels before spending a key / starting the new run.
+        // intact if the player cancels before spending a key.
         if (fromInAdventure && sessionActive) {
             returnToMainMenuSaving(confirm = false)
             handler.post { promptBossRaidEntry(fromInAdventure = false) }
@@ -1461,6 +1469,15 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Boss Raid locked")
                 .setMessage("Finish the story first (Acts 1–3). Boss Raid unlocks after Breach Sealed.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val save = livableSavedState()
+        if (save == null) {
+            AlertDialog.Builder(this)
+                .setTitle("Boss Raid")
+                .setMessage("No saved hero found. Finish the story (Acts 1–3) and keep a Continue save, then enter Boss Raid with that same character.")
                 .setPositiveButton("OK", null)
                 .show()
             return
@@ -1479,13 +1496,14 @@ class MainActivity : AppCompatActivity() {
                 .show()
             return
         }
+        val hero = heroNameFromSave(save)
         AlertDialog.Builder(this)
             .setTitle("Boss Raid")
             .setMessage(
-                "Spend 1 Raid Key to enter a focused endgame boss fight?\n\n" +
+                "Spend 1 Raid Key to enter a focused endgame boss fight with $hero?\n\n" +
                 "Keys held: $keys/2\n" +
-                "Rewards: gold, XP, Legendary chance, possible key drop.\n\n" +
-                "Note: starting a raid begins a new run (Continue will track the raid)."
+                "Your saved stats, gear, inventory, gold, companion, level, and Legendary upgrades carry over.\n" +
+                "Rewards: gold, XP, Legendary chance, possible key drop."
             )
             .setPositiveButton("Enter raid") { _, _ ->
                 if (!spendRaidKey()) {
@@ -1493,14 +1511,97 @@ class MainActivity : AppCompatActivity() {
                     refreshMainMenuButtons()
                     return@setPositiveButton
                 }
-                hideMainMenu()
-                askHeroName { name ->
-                    localPlayerName = name
-                    showClassSelection(mode = "raid")
+                if (!startBossRaidFromSave()) {
+                    // Refund key if we failed to start (save load / native).
+                    prefs().edit().putInt("raid_keys", (raidKeysHeld() + 1).coerceAtMost(2)).apply()
+                    Toast.makeText(this, "Could not start Boss Raid with your saved hero.", Toast.LENGTH_LONG).show()
+                    refreshMainMenuButtons()
+                    showStartDialog()
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /**
+     * Load Continue save, stash pre-raid snapshot, then spawn raid boss on the SAME party.
+     * Never calls resetGame / class select for raids.
+     */
+    private fun startBossRaidFromSave(): Boolean {
+        if (!nativeReady) {
+            Toast.makeText(this, "Native library not ready — can't start raid.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        val data = livableSavedState() ?: return false
+        if (saveIsGameOver(data)) {
+            Toast.makeText(this, "Your save is mid–Game Over. Continue the wipe first, then enter Boss Raid.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        detachOnlineSession()
+        // Snapshot adventure so wipe/menu can restore without creating a blank character.
+        prefs().edit()
+            .putString("pre_raid_save_state", data)
+            .putBoolean("raid_active", true)
+            .apply()
+        localPlayerName = heroNameFromSave(data)
+        localClassId = prefs().getInt("hero_class", 0)
+        try {
+            loadGameState(data)
+        } catch (e: Exception) {
+            Log.e(TAG, "Boss Raid load save failed", e)
+            prefs().edit().remove("pre_raid_save_state").putBoolean("raid_active", false).apply()
+            return false
+        }
+        val ok = try { beginBossRaidFromCurrent() } catch (e: Exception) {
+            Log.e(TAG, "beginBossRaidFromCurrent failed", e)
+            false
+        }
+        if (!ok) {
+            prefs().edit().remove("pre_raid_save_state").putBoolean("raid_active", false).apply()
+            return false
+        }
+        lastBattleRoster = ""
+        lastRoomDesc = ""
+        lastChatHistory = ""
+        lastProcessedEvent = ""
+        lastCoachTip = ""
+        lastCoachTurnKey = ""
+        wipeDialogShowing = false
+        storyCompleteRoutesShown = true
+        runDifficulty = try { getDifficulty() } catch (_: Exception) { preferredDifficulty.coerceIn(0, 3) }
+        setHost(true)
+        hideMainMenu()
+        activateSession()
+        btnReset.visibility = View.GONE
+        syncAndSave()
+        updateUi()
+        Toast.makeText(this, "Boss Raid — $localPlayerName enters the arena!", Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    private fun clearRaidSessionFlags() {
+        prefs().edit()
+            .remove("pre_raid_save_state")
+            .putBoolean("raid_active", false)
+            .apply()
+    }
+
+    /** Restore the pre-raid adventure save (same hero) without starting a blank character. */
+    private fun restorePreRaidSaveOrKeepCurrent(reason: String) {
+        val pre = prefs().getString("pre_raid_save_state", null)
+        if (!pre.isNullOrBlank() && pre.contains("|")) {
+            prefs().edit()
+                .putString("save_state", pre)
+                .putBoolean("crash_guard", false)
+                .putBoolean("raid_active", false)
+                .remove("pre_raid_save_state")
+                .apply()
+            Log.i(TAG, "Restored pre-raid save ($reason)")
+        } else {
+            // Keep whatever syncAndSave wrote (hero progress), but clear raid flags.
+            clearRaidSessionFlags()
+            Log.i(TAG, "No pre-raid snapshot; keeping current save ($reason)")
+        }
     }
 
     private fun showStoryCompleteRoutesDialog() {
@@ -3575,27 +3676,56 @@ class MainActivity : AppCompatActivity() {
     private fun handlePartyWipeUi() {
         if (!sessionActive || wipeDialogShowing) return
         val d = currentDifficultyForWipe()
+        val inRaid = prefs().getBoolean("raid_active", false) ||
+            try { getSoloPlayMode() == 2 } catch (_: Exception) { false }
         if (d == 3) {
-            clearSave("nightmare wipe")
             wipeDialogShowing = true
-            AlertDialog.Builder(this)
-                .setTitle("Game Over — Nightmare")
-                .setMessage("The entire party has fallen. Nightmare difficulty ends the run — stats, gear, and gold are lost.")
-                .setCancelable(false)
-                .setPositiveButton("Main menu") { _, _ ->
-                    wipeDialogShowing = false
-                    runDifficulty = -1
-                    abandonAdventure()
-                }
-                .show()
+            if (inRaid) {
+                // Nightmare raid wipe: do NOT create a blank character — restore pre-raid hero save.
+                restorePreRaidSaveOrKeepCurrent("nightmare raid wipe")
+                AlertDialog.Builder(this)
+                    .setTitle("Game Over — Nightmare Raid")
+                    .setMessage(
+                        "The party fell in the Boss Raid. Nightmare ends the raid attempt, " +
+                        "but your story hero save is restored (no blank character)."
+                    )
+                    .setCancelable(false)
+                    .setPositiveButton("Main menu") { _, _ ->
+                        wipeDialogShowing = false
+                        runDifficulty = -1
+                        sessionActive = false
+                        detachOnlineSession()
+                        clearRaidSessionFlags()
+                        showStartDialog()
+                    }
+                    .show()
+            } else {
+                clearSave("nightmare wipe")
+                AlertDialog.Builder(this)
+                    .setTitle("Game Over — Nightmare")
+                    .setMessage("The entire party has fallen. Nightmare difficulty ends the run — stats, gear, and gold are lost.")
+                    .setCancelable(false)
+                    .setPositiveButton("Main menu") { _, _ ->
+                        wipeDialogShowing = false
+                        runDifficulty = -1
+                        abandonAdventure()
+                    }
+                    .show()
+            }
             return
         }
         try { syncAndSave() } catch (_: Exception) {}
         wipeDialogShowing = true
         val title = "Game Over — ${difficultyLabel(d)}"
-        val msg = when (d) {
-            0 -> "Easy: no loss of stats, gear, or gold. Continue revives the party with full HP one chamber back."
-            1 -> "Medium: no loss of stats, gear, or gold. Continue revives with half HP one chamber back."
+        val msg = when {
+            inRaid && d == 0 ->
+                "Easy raid wipe: Continue revives your story hero (full HP) and ends the raid without a new character."
+            inRaid && d == 1 ->
+                "Medium raid wipe: Continue revives your story hero (half HP) and ends the raid without a new character."
+            inRaid ->
+                "Hard raid wipe: Continue revives your story hero (gear/gold stripped to starters) and ends the raid."
+            d == 0 -> "Easy: no loss of stats, gear, or gold. Continue revives the party with full HP one chamber back."
+            d == 1 -> "Medium: no loss of stats, gear, or gold. Continue revives with half HP one chamber back."
             else -> "Hard: stats kept, but gold and gear are stripped to starters. Continue revives one chamber back."
         }
         AlertDialog.Builder(this)
@@ -3610,18 +3740,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (ok) {
                     btnReset.visibility = View.GONE
+                    clearRaidSessionFlags()
                     syncAndSave()
                     updateUi()
                     Toast.makeText(this, "The party rises…", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, "Could not Continue — return to menu.", Toast.LENGTH_LONG).show()
-                    clearSave("recover failed")
+                    if (inRaid) restorePreRaidSaveOrKeepCurrent("recover failed raid")
+                    else clearSave("recover failed")
                     resetToStartMenu()
                 }
             }
             .setNegativeButton("Main menu") { _, _ ->
                 wipeDialogShowing = false
-                clearSave("wipe quit to menu")
+                if (inRaid) restorePreRaidSaveOrKeepCurrent("wipe quit to menu raid")
+                else clearSave("wipe quit to menu")
                 runDifficulty = -1
                 resetToStartMenu()
             }

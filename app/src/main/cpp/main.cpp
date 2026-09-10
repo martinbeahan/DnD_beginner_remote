@@ -401,6 +401,18 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_consumePendingRaidKeyDrop(JNIEn
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_beginBossRaidFromCurrent(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.beginBossRaidFromCurrent() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_finishBossRaidKeepParty(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    g_Game.finishBossRaidKeepParty();
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_recoverFromPartyWipe(JNIEnv *env, jobject thiz) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     return g_Game.recoverFromPartyWipe() ? JNI_TRUE : JNI_FALSE;

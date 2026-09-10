@@ -32,6 +32,10 @@ public:
                       int difficulty = static_cast<int>(Difficulty::EASY),
                       CharacterClass companionClass = CharacterClass::WIZARD,
                       bool companionAutoAi = true);
+    /** Convert current party into a Boss Raid encounter — keeps hero/companion/gear/progress. */
+    bool beginBossRaidFromCurrent();
+    /** After raid clear/wipe-recover: restore prior story/crawl mode without wiping the party. */
+    void finishBossRaidKeepParty();
     void startDmSession(const std::string& dmName);
     void addAlly(const std::string& name, CharacterClass cl);
     /** Solo NPC companion helpers (host/solo). Empty name if none. */
@@ -208,6 +212,9 @@ private:
     bool questAct3SealFound_ = false;
     int soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
     int difficulty_ = static_cast<int>(Difficulty::EASY);
+    /** Snapshot when entering raid from a loaded adventure (-1 = none). */
+    int preRaidSoloPlayMode_ = -1;
+    int preRaidRoomCount_ = 0;
     std::string dmName_;
 
     std::mt19937 rng_;
