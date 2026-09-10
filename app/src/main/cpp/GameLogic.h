@@ -504,19 +504,23 @@ public:
 class LootSystem {
 public:
     /**
-     * luckBonus: 0 normal; bosses add 20–50 to favor Rare/Epic.
-     * preferClass / preferClass2: party class tags (-1 = unused). Strongly bias toward party
-     * classes; "Any" remains common; off-party class gear is rare (still useful for transfer).
+     * luckBonus: 0 normal; bosses add ~15–35 (mild Rare/Epic favor, not BiS flood).
+     * Drop chance and rarity use separate rolls so boss luck raises find rate without
+     * near-guaranteeing Epic. preferClass / preferClass2: party class tags (-1 = unused).
+     * Strongly bias toward party classes; "Any" remains common; off-party is rare.
      */
     static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0,
                                               int preferClass = -1, int preferClass2 = -1) {
-        int roll = (rand() % 100) + luckBonus;
-        if (roll < 55) return nullptr; // often nothing on normal clears
+        // Drop gate (was shared with rarity — Rare/Epic too easy on trash clears).
+        int dropRoll = (rand() % 100) + luckBonus;
+        if (dropRoll < 58) return nullptr; // ~42% item on luck=0 (was ~45%)
 
+        // Rarity: luck only adds luckBonus/3 so bosses stay better than trash, not BiS-guaranteed.
+        int rarityRoll = (rand() % 100) + (luckBonus / 3);
         ItemRarity rarity = ItemRarity::COMMON;
-        if (roll >= 95) rarity = ItemRarity::EPIC;
-        else if (roll >= 82) rarity = ItemRarity::RARE;
-        else if (roll >= 68) rarity = ItemRarity::UNCOMMON;
+        if (rarityRoll >= 98) rarity = ItemRarity::EPIC;       // was >=95 on shared roll (~5% abs)
+        else if (rarityRoll >= 90) rarity = ItemRarity::RARE;  // was >=82 (~13% abs)
+        else if (rarityRoll >= 70) rarity = ItemRarity::UNCOMMON; // was >=68
 
         int bonus = (roomDepth / 5) + static_cast<int>(rarity);
         if (bonus < 0) bonus = 0;

@@ -800,14 +800,20 @@ void Game::restockShop() {
     shopInventory_.push_back(Item::make("Healing Draught", ItemType::POTION, 8 + depthBonus, ItemRarity::COMMON, -1));
     shopInventory_.push_back(Item::make("Greater Potion", ItemType::POTION, 14 + depthBonus, ItemRarity::UNCOMMON, -1));
 
-    // Party-relevant class stock first.
+    // Party-relevant class stock first — commons/uncommons dominate early; Rare/Epic gated deeper.
     if (preferA >= 0) {
         shopInventory_.push_back(classWeapon(preferA, ItemRarity::UNCOMMON, depthBonus + 1));
-        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferA, ItemRarity::RARE, depthBonus + 3));
+        if (roomCount_ >= 10)
+            shopInventory_.push_back(classArmor(preferA, ItemRarity::RARE, depthBonus + 2));
+        else if (roomCount_ >= 5)
+            shopInventory_.push_back(classArmor(preferA, ItemRarity::UNCOMMON, depthBonus + 1));
     }
     if (preferB >= 0 && preferB != preferA) {
         shopInventory_.push_back(classWeapon(preferB, ItemRarity::UNCOMMON, depthBonus + 1));
-        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferB, ItemRarity::RARE, depthBonus + 2));
+        if (roomCount_ >= 12)
+            shopInventory_.push_back(classArmor(preferB, ItemRarity::RARE, depthBonus + 2));
+        else if (roomCount_ >= 6)
+            shopInventory_.push_back(classArmor(preferB, ItemRarity::UNCOMMON, depthBonus + 1));
     }
     // One off-class piece OK (for transfer / future companion swap).
     int off = -1;
@@ -817,10 +823,11 @@ void Game::restockShop() {
     if (off >= 0) {
         shopInventory_.push_back(classWeapon(off, ItemRarity::UNCOMMON, depthBonus + 1));
     }
-    if (roomCount_ >= 10 && preferA >= 0) {
+    // Single Epic offer mid-late; second Epic only very deep (was dual Epic at room 10).
+    if (roomCount_ >= 16 && preferA >= 0) {
         shopInventory_.push_back(classWeapon(preferA, ItemRarity::EPIC, depthBonus + 3));
     }
-    if (roomCount_ >= 10 && preferB >= 0) {
+    if (roomCount_ >= 20 && preferB >= 0) {
         shopInventory_.push_back(classArmor(preferB, ItemRarity::EPIC, depthBonus + 4));
     }
 }
@@ -1241,7 +1248,7 @@ void Game::noteBossDefeat(const std::string& foeName) {
     int tier = LootSystem::bossTier(foeName);
     if (tier <= 0) return;
     pendingBossXpBonus_ += 40 * tier + roomCount_ * 2;
-    pendingBossLootLuck_ += 15 + tier * 12;
+    pendingBossLootLuck_ += 10 + tier * 8; // was 15+tier*12 — bosses better than trash, not BiS flood
     pendingBossGoldBonus_ += 20 * tier + getRandomInt(5, 15);
     dmSay("Boss fallen: " + foeName + "! Greater rewards await.");
 }
@@ -1420,8 +1427,9 @@ void Game::enterClearedRoom(Character* actor) {
             dmSay(actor->name + " finds " + loot->getDescription() + " [" + loot->rarityLabel() + "] — check Inventory.");
             addJournalEntry(actor->name + " found loot: " + loot->getDescription() + " (" + loot->rarityLabel() + ")");
         } else if (luck > 0) {
-            // Boss clears always drop something when luck was banked but roll missed — guarantee uncommon+.
-            auto pity = LootSystem::generateLoot(roomCount_, 80, preferA, preferB);
+            // Boss pity: guarantee a drop without the old luck=80 Epic flood.
+            auto pity = LootSystem::generateLoot(roomCount_, 30, preferA, preferB);
+            if (!pity) pity = LootSystem::generateLoot(roomCount_, 60, preferA, preferB);
             if (pity) {
                 actor->addToInventory(pity);
                 dmSay(actor->name + " claims a boss trophy: " + pity->getDescription() + " [" + pity->rarityLabel() + "].");
