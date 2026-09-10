@@ -47,7 +47,12 @@
         <item name="backgroundTint">@null</item>
     </style>
 
-    <style name="Text.DnD.SectionLabel">
+    <!-- Parent required: dotted Text.DnD.* styles imply style/Text.DnD for AAPT. -->
+    <style name="Text.DnD" parent="TextAppearance.AppCompat">
+        <item name="android:textColor">@color/parchment</item>
+    </style>
+
+    <style name="Text.DnD.SectionLabel" parent="Text.DnD">
         <item name="android:textColor">@color/gold</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textSize">12sp</item>
