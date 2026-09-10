@@ -1,4 +1,4 @@
-# Endgame / Act 3 / Boss Raids — v2.6 (versionCode 37)
+# Endgame / Act 3 / Boss Raids — v2.6.1 (versionCode 38)
 
 **Base:** master after Text.DnD (#45); incorporates #46 drop-nerf weights (separate drop/rarity rolls; shop Rare/Epic gated deeper). **Legal:** original Act 3 / raid / endgame boss names & flavor; SRD-safe monsters only; no WotC module text. No new art assets (reuse existing CC0 stages/sprites — see `ATTRIBUTION.md`).
 
@@ -43,6 +43,13 @@ Acts 1+2 unchanged; after Act 2 Settled, Onward starts Act 3 (not procedural). A
 ## Persist / preserve
 
 Act 3 flags + endgame boss-seen in serialize; inventory Legendary token fields; transfer/class lock/sell/upgrade; difficulty wipes; companion; audio; Text.DnD UI.
+
+## 5) Post-story navigation (v2.6.1 hotfix)
+
+- **Story-complete CTA:** when Acts 1–3 first complete, dialog offers **Boss Raid**, **Main menu**, or Keep exploring (no app relaunch).
+- **Settings / HUD:** **Return to main menu** saves via `syncAndSave` / prefs — keeps Continue, gear, quest flags, Raid Keys (unlike Abandon).
+- **Settings Boss Raid:** visible in-adventure; locked reason if story incomplete; otherwise saves then opens the same Boss Raid flow as the main menu.
+- Raid key spend caps and `story_fully_complete` gate unchanged.
 
 ## Device checklist
 
