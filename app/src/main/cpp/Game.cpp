@@ -1538,6 +1538,86 @@ void Game::rollbackOneRoomOrBeat() {
     }
 }
 
+bool Game::beginBossRaidFromCurrent() {
+    if (players_.empty()) return false;
+
+    // Preserve party (stats, gear, inventory, gold, companion, level, Legendary upgrades).
+    if (soloPlayMode_ != static_cast<int>(SoloPlayMode::RAID)) {
+        preRaidSoloPlayMode_ = soloPlayMode_;
+        preRaidRoomCount_ = roomCount_;
+    }
+
+    soloPlayMode_ = static_cast<int>(SoloPlayMode::RAID);
+    gameOver_ = false;
+    dmOnlyTable_ = false;
+    isHost_ = true;
+    dmName_.clear();
+    pendingRaidKeyDrop_ = false;
+    pendingBossXpBonus_ = 0;
+    pendingBossLootLuck_ = 0;
+    pendingBossGoldBonus_ = 0;
+
+    // Endgame gates active for this encounter (story must already be complete at menu).
+    questBeat_ = static_cast<int>(SoloQuestBeat::NONE);
+    questComplete_ = true;
+    questAct2Complete_ = true;
+    questAct3Complete_ = true;
+
+    enemies_.clear();
+    shopInventory_.clear();
+    isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
+    // Deep-room bias for raid loot/tuning without permanently rewriting adventure room.
+    roomCount_ = std::max(roomCount_, 20);
+
+    int pick = getRandomInt(0, 2);
+    if (pick == 0) spawnNamedBoss("Hollow Crown", 4);
+    else if (pick == 1) spawnNamedBoss("Ember Hydra", 5);
+    else spawnNamedBoss("Nightfang Matriarch", 4);
+
+    roomDescription_ = "Raid arena — a sealed endgame vault. One Raid Key spent. Defeat the raid boss for rich spoils.";
+    lastEvent_ = "BOSS RAID! Stand ready!";
+    dmSay("Boss Raid begins with your saved hero. Earn gold, XP, and a chance at Legendary gear and another key.");
+    if (!enemies_.empty()) rollInitiative();
+    else { turnOrder_.clear(); currentTurnIndex_ = 0; }
+    addChatMessage("System", "Boss Raid begins (difficulty: " + std::string(difficultyName(difficulty_)) + ") — same hero preserved.");
+    return true;
+}
+
+void Game::finishBossRaidKeepParty() {
+    if (!isBossRaid() && preRaidSoloPlayMode_ < 0) return;
+
+    enemies_.clear();
+    shopInventory_.clear();
+    isMerchantRoom_ = false;
+    roomSearchUsed_ = false;
+    turnOrder_.clear();
+    currentTurnIndex_ = 0;
+    gameOver_ = false;
+
+    if (preRaidSoloPlayMode_ >= 0) {
+        soloPlayMode_ = preRaidSoloPlayMode_;
+        if (preRaidRoomCount_ > 0) roomCount_ = preRaidRoomCount_;
+    } else {
+        // Fallback if mid-raid save lost the snapshot: stay in story endgame.
+        soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
+    }
+    preRaidSoloPlayMode_ = -1;
+    preRaidRoomCount_ = 0;
+
+    // Keep endgame story flags; adventure continues with same character.
+    questComplete_ = true;
+    questAct2Complete_ = true;
+    questAct3Complete_ = true;
+    questBeat_ = static_cast<int>(SoloQuestBeat::NONE);
+
+    generateRoomDescription();
+    lastEvent_ = "Raid ended — your hero and gear are intact. Return to the menu or press Onward to keep exploring.";
+    dmSay(lastEvent_);
+    addChatMessage("System", "Boss Raid finished — story character preserved.");
+    addJournalEntry("Boss Raid concluded; party preserved.");
+}
+
 bool Game::recoverFromPartyWipe() {
     if (!gameOver_) return false;
     if (static_cast<Difficulty>(difficulty_) == Difficulty::NIGHTMARE) {
@@ -1546,6 +1626,16 @@ bool Game::recoverFromPartyWipe() {
     }
     gameOver_ = false;
     revivePartyForDifficulty();
+    if (isBossRaid()) {
+        // Mid-raid wipe: apply difficulty revive, then leave raid without spawning a blank run.
+        finishBossRaidKeepParty();
+        const char* dname = difficultyName(difficulty_);
+        lastEvent_ = std::string("Continue (") + dname + ") — raid aborted; your story hero stands again.";
+        dmSay(lastEvent_);
+        addChatMessage("System", lastEvent_);
+        addJournalEntry(std::string("Raid wipe Continue on ") + dname + " — character preserved.");
+        return true;
+    }
     rollbackOneRoomOrBeat();
     const char* dname = difficultyName(difficulty_);
     lastEvent_ = std::string("Continue (") + dname + ") — the party rises one chamber back.";
@@ -2148,6 +2238,15 @@ void Game::playerAdvanceFromCleared() {
     if (!enemies_.empty()) {
         lastEvent_ = "Can't press Onward — foes remain!";
         dmSay("Steel yourselves — finish the fight first.");
+        return;
+    }
+
+    // Boss Raid clear: keep spoils on the same hero, restore prior adventure mode.
+    if (isBossRaid()) {
+        finishBossRaidKeepParty();
+        lastEvent_ = "Raid victorious! Spoils kept on your story hero. Onward resumes your adventure, or use Menu.";
+        dmSay(lastEvent_);
+        addChatMessage("Quest", "Boss Raid cleared — character preserved.");
         return;
     }
 
