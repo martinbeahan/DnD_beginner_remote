@@ -134,6 +134,27 @@
                 android:textSize="14sp" />
 
             <Button
+                android:id="@+id/btnMenuRaid"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:layout_marginBottom="2dp"
+                android:text="Boss Raid"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/mainMenuRaidHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:fontFamily="serif"
+                android:text="Finish the story first (Acts 1–3)"
+                android:textColor="@color/ink"
+                android:textSize="11sp"
+                android:paddingBottom="6dp" />
+
+            <Button
                 android:id="@+id/btnMenuHost"
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"

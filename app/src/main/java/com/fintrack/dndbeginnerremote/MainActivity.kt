@@ -80,6 +80,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnMenuContinue: Button
     private lateinit var btnMenuSolo: Button
     private lateinit var btnMenuCrawl: Button
+    private lateinit var btnMenuRaid: Button
+    private lateinit var mainMenuRaidHint: TextView
     private lateinit var btnMenuDifficulty: Button
     private lateinit var btnMenuHost: Button
     private lateinit var btnMenuJoin: Button
@@ -215,6 +217,8 @@ class MainActivity : AppCompatActivity() {
     external fun setDifficulty(difficulty: Int)
     external fun getDifficulty(): Int
     external fun getSoloPlayMode(): Int
+    external fun isStoryFullyComplete(): Boolean
+    external fun consumePendingRaidKeyDrop(): Boolean
     external fun recoverFromPartyWipe(): Boolean
     external fun startDmSession(dmName: String)
     external fun dmBeginDungeon()
@@ -1091,6 +1095,21 @@ class MainActivity : AppCompatActivity() {
             btnMenuContinue.visibility = View.GONE
             mainMenuSubtitle.text = "Choose your path"
         }
+        if (::btnMenuRaid.isInitialized) {
+            syncRaidKeyDay()
+            val storyDone = isMetaStoryComplete()
+            val keys = raidKeysHeld()
+            btnMenuRaid.isEnabled = storyDone
+            btnMenuRaid.alpha = if (storyDone) 1f else 0.45f
+            btnMenuRaid.text = if (storyDone) "Boss Raid ($keys/2 keys)" else "Boss Raid (locked)"
+            if (::mainMenuRaidHint.isInitialized) {
+                mainMenuRaidHint.text = when {
+                    !storyDone -> "Finish the story first (Acts 1–3)"
+                    keys <= 0 -> "Need a Raid Key (drop from endgame bosses; max 2/day)"
+                    else -> "Costs 1 Raid Key · strong rewards · max 2 keys/day"
+                }
+            }
+        }
     }
 
     private fun showDifficultyPicker(lockForRun: Boolean) {
@@ -1130,6 +1149,8 @@ class MainActivity : AppCompatActivity() {
         btnMenuContinue = findViewById(R.id.btnMenuContinue)
         btnMenuSolo = findViewById(R.id.btnMenuSolo)
         btnMenuCrawl = findViewById(R.id.btnMenuCrawl)
+        btnMenuRaid = findViewById(R.id.btnMenuRaid)
+        mainMenuRaidHint = findViewById(R.id.mainMenuRaidHint)
         btnMenuDifficulty = findViewById(R.id.btnMenuDifficulty)
         btnMenuHost = findViewById(R.id.btnMenuHost)
         btnMenuJoin = findViewById(R.id.btnMenuJoin)
@@ -1165,6 +1186,46 @@ class MainActivity : AppCompatActivity() {
                 localPlayerName = name
                 showClassSelection(mode = "crawl")
             }
+        }
+        btnMenuRaid.setOnClickListener {
+            if (!isMetaStoryComplete()) {
+                Toast.makeText(this, "Finish the story first (Acts 1–3).", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            syncRaidKeyDay()
+            val keys = raidKeysHeld()
+            if (keys <= 0) {
+                AlertDialog.Builder(this)
+                    .setTitle("Boss Raid")
+                    .setMessage(
+                        "Boss Raid costs 1 Raid Key.\n\n" +
+                        "Keys drop randomly from endgame bosses (deep crawl after story + raid clears).\n" +
+                        "You can hold and be granted at most 2 keys per calendar day."
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
+                return@setOnClickListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Boss Raid")
+                .setMessage(
+                    "Spend 1 Raid Key to enter a focused endgame boss fight?\n\n" +
+                    "Keys held: $keys/2\n" +
+                    "Rewards: gold, XP, Legendary chance, possible key drop."
+                )
+                .setPositiveButton("Enter raid") { _, _ ->
+                    if (!spendRaidKey()) {
+                        Toast.makeText(this, "No Raid Key.", Toast.LENGTH_SHORT).show()
+                        refreshMainMenuButtons()
+                        return@setPositiveButton
+                    }
+                    askHeroName { name ->
+                        localPlayerName = name
+                        showClassSelection(mode = "raid")
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
         btnMenuDifficulty.setOnClickListener {
             showDifficultyPicker(lockForRun = false)
@@ -1373,6 +1434,7 @@ class MainActivity : AppCompatActivity() {
         val title = when (mode) {
             "join" -> "Choose your class"
             "crawl" -> "Dungeon Crawl — choose class"
+            "raid" -> "Boss Raid — choose class"
             "solo" -> "Story — choose class"
             else -> "Choose your class"
         }
@@ -1432,7 +1494,11 @@ class MainActivity : AppCompatActivity() {
             "Rogue — Sable",
             "Cleric — Miren"
         )
-        val title = if (mode == "crawl") "Dungeon Crawl — companion class" else "Story — companion class"
+        val title = when (mode) {
+            "crawl" -> "Dungeon Crawl — companion class"
+            "raid" -> "Boss Raid — companion class"
+            else -> "Story — companion class"
+        }
         AlertDialog.Builder(this).setTitle(title).setItems(classes) { _, companionClass ->
             AlertDialog.Builder(this)
                 .setTitle("Companion control")
@@ -1458,7 +1524,11 @@ class MainActivity : AppCompatActivity() {
         companionAutoAi: Boolean
     ) {
         detachOnlineSession()
-        val playMode = if (mode == "crawl") 1 else 0
+        val playMode = when (mode) {
+            "crawl" -> 1
+            "raid" -> 2
+            else -> 0
+        }
         runDifficulty = preferredDifficulty.coerceIn(0, 3)
         resetGame(heroClass, localPlayerName, playMode, runDifficulty, companionClass, companionAutoAi)
         setHost(true)
@@ -2039,8 +2109,91 @@ class MainActivity : AppCompatActivity() {
             "uncommon" -> getColor(R.color.rarity_uncommon)
             "rare" -> getColor(R.color.rarity_rare)
             "epic" -> getColor(R.color.rarity_epic)
+            "legendary" -> getColor(R.color.rarity_legendary)
             else -> getColor(R.color.rarity_common)
         }
+    }
+
+    /** Calendar day string in local timezone for raid-key daily cap. */
+    private fun raidKeyToday(): String {
+        val cal = java.util.Calendar.getInstance()
+        return String.format(
+            "%04d-%02d-%02d",
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    /** Max 2 Raid Keys held; grants also capped at 2 per calendar day. */
+    private fun syncRaidKeyDay() {
+        val today = raidKeyToday()
+        val prefs = prefs()
+        if (prefs.getString("raid_keys_date", "") != today) {
+            prefs.edit()
+                .putString("raid_keys_date", today)
+                .putInt("raid_keys_granted_today", 0)
+                .apply()
+        }
+    }
+
+    private fun raidKeysHeld(): Int {
+        syncRaidKeyDay()
+        return prefs().getInt("raid_keys", 0).coerceIn(0, 2)
+    }
+
+    private fun raidKeysGrantedToday(): Int {
+        syncRaidKeyDay()
+        return prefs().getInt("raid_keys_granted_today", 0).coerceIn(0, 2)
+    }
+
+    private fun tryGrantRaidKeyFromDrop(): Boolean {
+        syncRaidKeyDay()
+        val held = raidKeysHeld()
+        if (held >= 2) {
+            Toast.makeText(this, "Raid Key found, but you already hold 2 (daily max).", Toast.LENGTH_LONG).show()
+            return false
+        }
+        if (raidKeysGrantedToday() >= 2) {
+            Toast.makeText(this, "Raid Key found, but daily grant cap (2) already reached.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        prefs().edit()
+            .putInt("raid_keys", held + 1)
+            .putInt("raid_keys_granted_today", raidKeysGrantedToday() + 1)
+            .apply()
+        Toast.makeText(this, "Raid Key obtained! (${held + 1}/2 held).", Toast.LENGTH_LONG).show()
+        return true
+    }
+
+    private fun spendRaidKey(): Boolean {
+        syncRaidKeyDay()
+        val held = raidKeysHeld()
+        if (held <= 0) return false
+        prefs().edit().putInt("raid_keys", held - 1).apply()
+        return true
+    }
+
+    private fun isMetaStoryComplete(): Boolean {
+        if (prefs().getBoolean("story_fully_complete", false)) return true
+        return try { isStoryFullyComplete() } catch (_: Exception) { false }
+    }
+
+    private fun markMetaStoryCompleteIfNeeded() {
+        try {
+            if (isStoryFullyComplete()) {
+                prefs().edit().putBoolean("story_fully_complete", true).apply()
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun pollRaidKeyDrop() {
+        try {
+            if (consumePendingRaidKeyDrop()) {
+                tryGrantRaidKeyFromDrop()
+                refreshMainMenuButtons()
+            }
+        } catch (_: Exception) { }
     }
 
 
@@ -2121,6 +2274,7 @@ class MainActivity : AppCompatActivity() {
                 val upgLvl = parts[6]
                 val upgCost = parts[7].toIntOrNull() ?: 0
                 val sellPrice = parts.getOrNull(8)?.toIntOrNull() ?: 1
+                val legText = parts.getOrNull(9)?.trim().orEmpty()
                 val index = idxPart.toIntOrNull() ?: continue
                 val row = layoutInflater.inflate(R.layout.item_inventory_row, list, false)
                 val nameTv = row.findViewById<TextView>(R.id.invItemName)
@@ -2146,6 +2300,7 @@ class MainActivity : AppCompatActivity() {
                 metaTv.text = buildString {
                     append("$rarity · $cls · $type · $slotLabel · upg $upgLvl · sell ${sellPrice}g")
                     if (classLocked) append(" · $lockMsg")
+                    if (legText.isNotBlank()) append("\n$legText")
                 }
                 sellBtn.text = "Sell (${sellPrice}g)"
                 val hasAlly = companionNameSafe().isNotBlank()
@@ -2405,6 +2560,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateUi() {
         if (!nativeReady) return
         val status = getPlayerStatus()
+        markMetaStoryCompleteIfNeeded()
+        pollRaidKeyDrop()
         val isShop = isMerchantRoom()
 
         // Compact HUD — full sheet stays behind Sheet
@@ -2424,13 +2581,23 @@ class MainActivity : AppCompatActivity() {
             status.contains("Story complete", ignoreCase = true) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
                 "Story complete · Search, Rest, or Onward"
-            status.contains("Story complete", ignoreCase = true) -> "Story complete — both acts"
+            status.contains("Story complete", ignoreCase = true) &&
+                status.contains("endgame", ignoreCase = true) -> "Story complete — endgame unlocked"
+            status.contains("Story complete", ignoreCase = true) -> "Story complete — Acts 1–3"
+            status.contains("Mode: Boss Raid", ignoreCase = true) -> "Boss Raid"
+            status.contains("Quest: Emberdeep", ignoreCase = true) &&
+                try { isRoomCleared() } catch (_: Exception) { false } ->
+                "Act 3 · clear — Search, Rest, or Onward"
+            status.contains("Quest: Emberdeep", ignoreCase = true) ->
+                status.lineSequence().firstOrNull { it.startsWith("Quest:") }?.removePrefix("Quest:")?.trim()
+                    ?.let { "Quest · $it" } ?: "Act 3 — Emberdeep Breach"
             status.contains("Quest complete", ignoreCase = true) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
                 "Main quest done — Ashen Lantern · Search, Rest, or Onward"
             status.contains("Quest complete", ignoreCase = true) -> "Main quest done — Ashen Lantern"
             (status.contains("Quest: Ashen Lantern", ignoreCase = true) ||
-                status.contains("Quest: Millhollow", ignoreCase = true)) &&
+                status.contains("Quest: Millhollow", ignoreCase = true) ||
+                status.contains("Quest: Emberdeep", ignoreCase = true)) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
                 status.lineSequence().firstOrNull { it.startsWith("Quest:") }?.removePrefix("Quest:")?.trim()
                     ?.let { "Quest · $it · clear" } ?: "Room clear — Search, Rest, or Onward"
@@ -2671,8 +2838,14 @@ class MainActivity : AppCompatActivity() {
         val res = when {
             // Boss rooms (Ashen Drake / kings / named boss beats)
             blob.contains("ashen drake") || blob.contains("goblin king") ||
-                blob.contains("skeleton king") || blob.contains("boss") ->
+                blob.contains("skeleton king") || blob.contains("hollow crown") ||
+                blob.contains("ember hydra") || blob.contains("nightfang") ||
+                blob.contains("breach warden") || blob.contains("boss") ->
                 R.drawable.bg_battle_stage_boss
+            // Act 3 — Emberdeep Breach
+            blob.contains("wellside") || blob.contains("old well") || blob.contains("ember seal") ||
+                blob.contains("root labyrinth") || blob.contains("breach") ->
+                R.drawable.bg_battle_stage_cave
             // Act 2 — Millhollow's Debt
             blob.contains("millrace") || blob.contains("weir") ->
                 R.drawable.bg_battle_stage_weir

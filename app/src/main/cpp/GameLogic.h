@@ -40,10 +40,22 @@ enum class ItemRarity {
     COMMON = 0,
     UNCOMMON = 1,
     RARE = 2,
-    EPIC = 3
+    EPIC = 3,
+    LEGENDARY = 4
 };
 
-/** classTag: -1 = any class; else CharacterClass ordinal. */
+/** Legendary sub-effect (unlocks at upgrade 20+). Persist as int id. */
+enum class LegendarySubEffect : int {
+    NONE = 0,
+    LIFESTEAL = 1,      // heal 1 + upgrade/10 on hit (weapon)
+    ON_HIT_HEAL = 2,    // flat +2 HP on hit (weapon)
+    FIGHT_SHIELD = 3    // once-per-fight absorb ~5 HP (armor)
+};
+
+/** classTag: -1 = any class; else CharacterClass ordinal.
+ *  Legendary: legStat0/1/2 = attribute indices (0=STR..5=CHA), -1 unused.
+ *  subEffect unlocks visually/mechanically at upgradeLevel >= 20.
+ */
 struct Item {
     std::string name;
     ItemType type;
@@ -51,6 +63,10 @@ struct Item {
     ItemRarity rarity = ItemRarity::COMMON;
     int classTag = -1;
     int upgradeLevel = 0;
+    int legStat0 = -1;
+    int legStat1 = -1;
+    int legStat2 = -1;
+    int subEffect = 0; // LegendarySubEffect
 
     static const char* rarityName(ItemRarity r) {
         switch (r) {
@@ -58,8 +74,84 @@ struct Item {
             case ItemRarity::UNCOMMON: return "Uncommon";
             case ItemRarity::RARE: return "Rare";
             case ItemRarity::EPIC: return "Epic";
+            case ItemRarity::LEGENDARY: return "Legendary";
         }
         return "Common";
+    }
+
+    static const char* attrShort(int idx) {
+        switch (idx) {
+            case 0: return "STR";
+            case 1: return "DEX";
+            case 2: return "CON";
+            case 3: return "INT";
+            case 4: return "WIS";
+            case 5: return "CHA";
+            default: return "?";
+        }
+    }
+
+    static const char* subEffectName(int id) {
+        switch (static_cast<LegendarySubEffect>(id)) {
+            case LegendarySubEffect::LIFESTEAL: return "Lifesteal (on hit)";
+            case LegendarySubEffect::ON_HIT_HEAL: return "On-hit heal";
+            case LegendarySubEffect::FIGHT_SHIELD: return "Once-per-fight shield";
+            default: return "";
+        }
+    }
+
+    /** Upgrade level cap by rarity — Legendary reaches 20+ for full power. */
+    int maxUpgradeLevel() const {
+        switch (rarity) {
+            case ItemRarity::COMMON: return 5;
+            case ItemRarity::UNCOMMON: return 8;
+            case ItemRarity::RARE: return 12;
+            case ItemRarity::EPIC: return 16;
+            case ItemRarity::LEGENDARY: return 25;
+        }
+        return 5;
+    }
+
+    /** How many legendary bonus stats are active at current upgrade. */
+    int activeLegStatCount() const {
+        if (rarity != ItemRarity::LEGENDARY) return 0;
+        if (upgradeLevel >= 20) return 3;
+        if (upgradeLevel >= 15) return 2;
+        return 1;
+    }
+
+    bool subEffectUnlocked() const {
+        return rarity == ItemRarity::LEGENDARY && upgradeLevel >= 20 && subEffect > 0;
+    }
+
+    /** +1 per active legendary bonus stat matching this attribute index. */
+    int legendaryAttrBonus(int attrIndex) const {
+        if (rarity != ItemRarity::LEGENDARY) return 0;
+        int n = activeLegStatCount();
+        int add = 0;
+        if (n >= 1 && legStat0 == attrIndex) add++;
+        if (n >= 2 && legStat1 == attrIndex) add++;
+        if (n >= 3 && legStat2 == attrIndex) add++;
+        return add;
+    }
+
+    std::string legendaryBonusText() const {
+        if (rarity != ItemRarity::LEGENDARY) return "";
+        std::stringstream ss;
+        int n = activeLegStatCount();
+        ss << "Bonus stats:";
+        if (n >= 1 && legStat0 >= 0) ss << " +" << attrShort(legStat0);
+        if (n >= 2 && legStat1 >= 0) ss << " +" << attrShort(legStat1);
+        if (n >= 3 && legStat2 >= 0) ss << " +" << attrShort(legStat2);
+        if (n < 3) {
+            ss << " (next at +" << (n == 1 ? 15 : 20) << ")";
+        }
+        if (subEffectUnlocked()) {
+            ss << " | " << subEffectName(subEffect);
+        } else if (rarity == ItemRarity::LEGENDARY && subEffect > 0) {
+            ss << " | " << subEffectName(subEffect) << " (unlocks at +20)";
+        }
+        return ss.str();
     }
 
     static const char* classTagName(int tag) {
@@ -98,9 +190,9 @@ struct Item {
     /** Sell-back gold: fair fraction of shop value, scaled by rarity + upgrades (~40–60%). */
     int sellPrice() const {
         int buy = shopCost();
-        // Common 40%, Uncommon 45%, Rare 50%, Epic 55%; +2% per upgrade tier, cap 60%.
+        // Common 40% … Legendary 60% base; +2% per upgrade tier, cap 65%.
         int pct = 40 + static_cast<int>(rarity) * 5 + upgradeLevel * 2;
-        if (pct > 60) pct = 60;
+        if (pct > 65) pct = 65;
         int price = (buy * pct) / 100;
         return std::max(1, price);
     }
@@ -110,23 +202,24 @@ struct Item {
         ss << name;
         if (bonus != 0) ss << " (+" << bonus << ")";
         if (upgradeLevel > 0) ss << " [+" << upgradeLevel << "]";
+        if (rarity == ItemRarity::LEGENDARY) ss << " ★";
         return ss.str();
     }
 
-    /** Persist token: name:bonus:W|A|P:rarity:classTag:upgrade */
+    /** Persist: name:bonus:W|A|P:rarity:classTag:upgrade:leg0:leg1:leg2:subEffect */
     std::string toToken() const {
         char t = 'W';
         if (type == ItemType::ARMOR) t = 'A';
         else if (type == ItemType::POTION) t = 'P';
         std::stringstream ss;
         ss << name << ":" << bonus << ":" << t << ":"
-           << static_cast<int>(rarity) << ":" << classTag << ":" << upgradeLevel;
+           << static_cast<int>(rarity) << ":" << classTag << ":" << upgradeLevel
+           << ":" << legStat0 << ":" << legStat1 << ":" << legStat2 << ":" << subEffect;
         return ss.str();
     }
 
     static std::shared_ptr<Item> fromToken(const std::string& tok) {
         if (tok.empty() || tok == "None" || tok.rfind("None:", 0) == 0) return nullptr;
-        // Split on ':'
         std::vector<std::string> parts;
         std::string cur;
         for (char c : tok) {
@@ -151,15 +244,48 @@ struct Item {
         if (parts.size() >= 6) {
             try { item->upgradeLevel = std::stoi(parts[5]); } catch (...) { item->upgradeLevel = 0; }
         }
-        if (static_cast<int>(item->rarity) < 0 || static_cast<int>(item->rarity) > 3)
+        if (parts.size() >= 7) {
+            try { item->legStat0 = std::stoi(parts[6]); } catch (...) { item->legStat0 = -1; }
+        }
+        if (parts.size() >= 8) {
+            try { item->legStat1 = std::stoi(parts[7]); } catch (...) { item->legStat1 = -1; }
+        }
+        if (parts.size() >= 9) {
+            try { item->legStat2 = std::stoi(parts[8]); } catch (...) { item->legStat2 = -1; }
+        }
+        if (parts.size() >= 10) {
+            try { item->subEffect = std::stoi(parts[9]); } catch (...) { item->subEffect = 0; }
+        }
+        if (static_cast<int>(item->rarity) < 0 || static_cast<int>(item->rarity) > 4)
             item->rarity = ItemRarity::COMMON;
         return item;
+    }
+
+    static void rollLegendaryExtras(Item& i) {
+        if (i.rarity != ItemRarity::LEGENDARY) return;
+        // Three distinct bonus stats
+        int pool[6] = {0,1,2,3,4,5};
+        for (int k = 5; k > 0; --k) {
+            int j = rand() % (k + 1);
+            int tmp = pool[k]; pool[k] = pool[j]; pool[j] = tmp;
+        }
+        i.legStat0 = pool[0];
+        i.legStat1 = pool[1];
+        i.legStat2 = pool[2];
+        if (i.type == ItemType::ARMOR) {
+            i.subEffect = static_cast<int>(LegendarySubEffect::FIGHT_SHIELD);
+        } else {
+            i.subEffect = (rand() % 2 == 0)
+                ? static_cast<int>(LegendarySubEffect::LIFESTEAL)
+                : static_cast<int>(LegendarySubEffect::ON_HIT_HEAL);
+        }
     }
 
     static std::shared_ptr<Item> make(const std::string& n, ItemType t, int b,
                                       ItemRarity r = ItemRarity::COMMON, int cls = -1) {
         auto i = std::make_shared<Item>();
         i->name = n; i->type = t; i->bonus = b; i->rarity = r; i->classTag = cls;
+        if (r == ItemRarity::LEGENDARY) rollLegendaryExtras(*i);
         return i;
     }
 };
@@ -236,7 +362,7 @@ struct Character {
     }
 
     void calculateAC() {
-        int dexMod = Attributes::getModifier(attributes.dexterity);
+        int dexMod = Attributes::getModifier(effectiveAttr(1));
         int armorBonus = (equippedArmor && equippedArmor->type == ItemType::ARMOR) ? equippedArmor->bonus : 0;
         armorClass = 10 + dexMod + armorBonus;
     }
@@ -371,6 +497,11 @@ struct Character {
             err = "Cannot upgrade that.";
             return false;
         }
+        if (item->upgradeLevel >= item->maxUpgradeLevel()) {
+            err = "Max upgrade (+" + std::to_string(item->maxUpgradeLevel()) + ") for "
+                + item->rarityLabel() + ".";
+            return false;
+        }
         int cost = item->upgradeCost();
         if (gold < cost) {
             err = "Not enough gold! Need " + std::to_string(cost) + "g.";
@@ -383,6 +514,31 @@ struct Character {
         err.clear();
         return true;
     }
+
+    /** Sum of legendary attr bonuses from equipped weapon+armor. */
+    int legendaryAttrBonus(int attrIndex) const {
+        int add = 0;
+        if (equippedWeapon) add += equippedWeapon->legendaryAttrBonus(attrIndex);
+        if (equippedArmor) add += equippedArmor->legendaryAttrBonus(attrIndex);
+        return add;
+    }
+
+    int effectiveAttr(int which) const {
+        int base = 0;
+        switch (which) {
+            case 0: base = attributes.strength; break;
+            case 1: base = attributes.dexterity; break;
+            case 2: base = attributes.constitution; break;
+            case 3: base = attributes.intelligence; break;
+            case 4: base = attributes.wisdom; break;
+            case 5: base = attributes.charisma; break;
+            default: return 10;
+        }
+        return base + legendaryAttrBonus(which);
+    }
+
+    /** Once-per-fight shield charges (armor Legendary sub-effect). Not persisted mid-fight across saves. */
+    mutable bool fightShieldUsed = false;
 
     std::string getDetailedSheet() const {
         std::stringstream ss;
@@ -467,10 +623,10 @@ struct RollResult {
 class CombatSystem {
 public:
     static int getPrimaryModifier(const Character& c) {
-        if (c.characterClass == CharacterClass::WIZARD) return Attributes::getModifier(c.attributes.intelligence);
-        if (c.characterClass == CharacterClass::ROGUE) return Attributes::getModifier(c.attributes.dexterity);
-        if (c.characterClass == CharacterClass::CLERIC) return Attributes::getModifier(c.attributes.wisdom);
-        return Attributes::getModifier(c.attributes.strength);
+        if (c.characterClass == CharacterClass::WIZARD) return Attributes::getModifier(c.effectiveAttr(3));
+        if (c.characterClass == CharacterClass::ROGUE) return Attributes::getModifier(c.effectiveAttr(1));
+        if (c.characterClass == CharacterClass::CLERIC) return Attributes::getModifier(c.effectiveAttr(4));
+        return Attributes::getModifier(c.effectiveAttr(0));
     }
 
     static int proficiencyBonusForLevel(int level) {
@@ -504,29 +660,43 @@ public:
 class LootSystem {
 public:
     /**
-     * luckBonus: 0 normal; bosses add ~15–35 (mild Rare/Epic favor, not BiS flood).
-     * Drop chance and rarity use separate rolls so boss luck raises find rate without
-     * near-guaranteeing Epic. preferClass / preferClass2: party class tags (-1 = unused).
-     * Strongly bias toward party classes; "Any" remains common; off-party is rare.
+     * luckBonus: 0 normal; bosses add mild luck (see noteBossDefeat).
+     * Drop chance and rarity use separate rolls (#46 hotfix): trash stays nerfed;
+     * bosses better than trash but not BiS-guaranteed.
+     * endgameUnlocked: Acts 1–3 complete — required for Legendary.
+     * preferClass / preferClass2: party class tags (-1 = unused).
      */
     static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0,
-                                              int preferClass = -1, int preferClass2 = -1) {
-        // Drop gate (was shared with rarity — Rare/Epic too easy on trash clears).
+                                              int preferClass = -1, int preferClass2 = -1,
+                                              bool endgameUnlocked = false) {
+        // Drop gate (shared luck) — ~42% item on luck=0
         int dropRoll = (rand() % 100) + luckBonus;
-        if (dropRoll < 58) return nullptr; // ~42% item on luck=0 (was ~45%)
+        if (dropRoll < 58) return nullptr;
 
-        // Rarity: luck only adds luckBonus/3 so bosses stay better than trash, not BiS-guaranteed.
+        // Rarity: luck only adds luckBonus/3 so bosses stay better than trash, not BiS flood.
         int rarityRoll = (rand() % 100) + (luckBonus / 3);
         ItemRarity rarity = ItemRarity::COMMON;
-        if (rarityRoll >= 98) rarity = ItemRarity::EPIC;       // was >=95 on shared roll (~5% abs)
-        else if (rarityRoll >= 90) rarity = ItemRarity::RARE;  // was >=82 (~13% abs)
-        else if (rarityRoll >= 70) rarity = ItemRarity::UNCOMMON; // was >=68
+        // Legendary: endgame + strong luck only (deep boss / raid)
+        if (endgameUnlocked && luckBonus >= 28 && rarityRoll >= 104) {
+            rarity = ItemRarity::LEGENDARY;
+        } else if (endgameUnlocked && luckBonus >= 40 && rarityRoll >= 99) {
+            rarity = ItemRarity::LEGENDARY;
+        } else if (rarityRoll >= 98) {
+            rarity = ItemRarity::EPIC;       // #46: was shared-roll >=95
+        } else if (rarityRoll >= 90) {
+            rarity = ItemRarity::RARE;      // #46: was >=82
+        } else if (rarityRoll >= 70) {
+            rarity = ItemRarity::UNCOMMON;  // #46: was >=68
+        }
+        if (!endgameUnlocked && rarity == ItemRarity::LEGENDARY) {
+            rarity = ItemRarity::EPIC;
+        }
 
         int bonus = (roomDepth / 5) + static_cast<int>(rarity);
+        if (rarity == ItemRarity::LEGENDARY) bonus += 2;
         if (bonus < 0) bonus = 0;
         bool weapon = (rand() % 2) == 0;
 
-        // Build party class list (unique).
         int party[4];
         int partyN = 0;
         auto pushParty = [&](int c) {
@@ -540,12 +710,9 @@ public:
         int cls = -1;
         int pick = rand() % 100;
         if (partyN > 0) {
-            // ~62% party-tagged, ~30% Any, ~8% off-party (for ally transfer interest).
-            if (pick < 62) {
-                cls = party[rand() % partyN];
-            } else if (pick < 92) {
-                cls = -1;
-            } else {
+            if (pick < 62) cls = party[rand() % partyN];
+            else if (pick < 92) cls = -1;
+            else {
                 int off[4];
                 int offN = 0;
                 for (int c = 0; c < 4; ++c) {
@@ -558,6 +725,22 @@ public:
         } else {
             if (pick < 40) cls = rand() % 4;
             else cls = -1;
+        }
+
+        if (rarity == ItemRarity::LEGENDARY) {
+            if (weapon) {
+                if (cls == 0) return Item::make("Crownbreaker", ItemType::WEAPON, bonus, rarity, 0);
+                if (cls == 1) return Item::make("Starfall Focus", ItemType::WEAPON, bonus, rarity, 1);
+                if (cls == 2) return Item::make("Nightwhisper", ItemType::WEAPON, bonus, rarity, 2);
+                if (cls == 3) return Item::make("Dawnward Mace", ItemType::WEAPON, bonus, rarity, 3);
+                return Item::make("Emberdeep Relic Blade", ItemType::WEAPON, bonus, rarity, -1);
+            } else {
+                if (cls == 0) return Item::make("Aegis of Millhollow", ItemType::ARMOR, bonus + 3, rarity, 0);
+                if (cls == 1) return Item::make("Archsage Mantle", ItemType::ARMOR, bonus + 1, rarity, 1);
+                if (cls == 2) return Item::make("Veilwalker Hide", ItemType::ARMOR, bonus + 2, rarity, 2);
+                if (cls == 3) return Item::make("Sanctum Plate", ItemType::ARMOR, bonus + 3, rarity, 3);
+                return Item::make("Emberdeep Relic Mail", ItemType::ARMOR, bonus + 2, rarity, -1);
+            }
         }
 
         if (weapon) {
@@ -581,14 +764,28 @@ public:
         return name.find("Goblin King") != std::string::npos
             || name.find("Skeleton King") != std::string::npos
             || name.find("Ashen Drake") != std::string::npos
-            || name.find("Dragon") != std::string::npos;
+            || name.find("Dragon") != std::string::npos
+            || name.find("Hollow Crown") != std::string::npos
+            || name.find("Ember Hydra") != std::string::npos
+            || name.find("Nightfang Matriarch") != std::string::npos
+            || name.find("Breach Warden") != std::string::npos;
     }
 
     static int bossTier(const std::string& name) {
+        if (name.find("Hollow Crown") != std::string::npos) return 4;
+        if (name.find("Ember Hydra") != std::string::npos) return 5;
+        if (name.find("Nightfang Matriarch") != std::string::npos) return 4;
         if (name.find("Ashen Drake") != std::string::npos || name.find("Dragon") != std::string::npos) return 3;
+        if (name.find("Breach Warden") != std::string::npos) return 3;
         if (name.find("Skeleton King") != std::string::npos) return 2;
         if (name.find("Goblin King") != std::string::npos) return 1;
         return 0;
+    }
+
+    static bool isEndgameBossName(const std::string& name) {
+        return name.find("Hollow Crown") != std::string::npos
+            || name.find("Ember Hydra") != std::string::npos
+            || name.find("Nightfang Matriarch") != std::string::npos;
     }
 };
 
