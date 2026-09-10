@@ -120,6 +120,39 @@
                 android:textSize="13sp" />
 
             <Button
+                android:id="@+id/btnSettingsReturnMenu"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="44dp"
+                android:layout_marginBottom="6dp"
+                android:text="Return to main menu"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btnSettingsBossRaid"
+                style="@style/Widget.DnD.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="44dp"
+                android:layout_marginBottom="6dp"
+                android:text="Boss Raid"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/settingsRaidHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textColor="@color/parchment_dark"
+                android:textSize="11sp"
+                android:paddingBottom="6dp"
+                android:visibility="gone"
+                android:text="" />
+
+            <Button
                 android:id="@+id/btnSettingsAbandon"
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"

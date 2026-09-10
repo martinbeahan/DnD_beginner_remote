@@ -96,9 +96,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chkDmVoice: CheckBox
     private lateinit var btnSettingsTutorial: Button
     private lateinit var btnSettingsAbandon: Button
+    private lateinit var btnSettingsReturnMenu: Button
+    private lateinit var btnSettingsBossRaid: Button
+    private lateinit var settingsRaidHint: TextView
     private lateinit var btnSettingsClose: Button
     private lateinit var settingsAboutText: TextView
     private lateinit var settingsDifficultyText: TextView
+    /** One-shot CTA after Acts 1–3 so player can open Boss Raid / menu without relaunch. */
+    private var storyCompleteRoutesShown = false
     // Audio prefs + GameAudio (BGM / SFX / optional on-device TTS).
     private var musicEnabled = true
     private var sfxEnabled = true
@@ -375,7 +380,7 @@ class MainActivity : AppCompatActivity() {
                 wipeDialogShowing = false
                 handlePartyWipeUi()
             } else {
-                resetToStartMenu()
+                returnToMainMenuSaving(confirm = true)
             }
         }
         btnReset.text = "Menu"
@@ -1165,6 +1170,9 @@ class MainActivity : AppCompatActivity() {
         chkSfx = findViewById(R.id.chkSfx)
         chkDmVoice = findViewById(R.id.chkDmVoice)
         btnSettingsTutorial = findViewById(R.id.btnSettingsTutorial)
+        btnSettingsReturnMenu = findViewById(R.id.btnSettingsReturnMenu)
+        btnSettingsBossRaid = findViewById(R.id.btnSettingsBossRaid)
+        settingsRaidHint = findViewById(R.id.settingsRaidHint)
         btnSettingsAbandon = findViewById(R.id.btnSettingsAbandon)
         btnSettingsClose = findViewById(R.id.btnSettingsClose)
         settingsAboutText = findViewById(R.id.settingsAboutText)
@@ -1188,44 +1196,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         btnMenuRaid.setOnClickListener {
-            if (!isMetaStoryComplete()) {
-                Toast.makeText(this, "Finish the story first (Acts 1–3).", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            syncRaidKeyDay()
-            val keys = raidKeysHeld()
-            if (keys <= 0) {
-                AlertDialog.Builder(this)
-                    .setTitle("Boss Raid")
-                    .setMessage(
-                        "Boss Raid costs 1 Raid Key.\n\n" +
-                        "Keys drop randomly from endgame bosses (deep crawl after story + raid clears).\n" +
-                        "You can hold and be granted at most 2 keys per calendar day."
-                    )
-                    .setPositiveButton("OK", null)
-                    .show()
-                return@setOnClickListener
-            }
-            AlertDialog.Builder(this)
-                .setTitle("Boss Raid")
-                .setMessage(
-                    "Spend 1 Raid Key to enter a focused endgame boss fight?\n\n" +
-                    "Keys held: $keys/2\n" +
-                    "Rewards: gold, XP, Legendary chance, possible key drop."
-                )
-                .setPositiveButton("Enter raid") { _, _ ->
-                    if (!spendRaidKey()) {
-                        Toast.makeText(this, "No Raid Key.", Toast.LENGTH_SHORT).show()
-                        refreshMainMenuButtons()
-                        return@setPositiveButton
-                    }
-                    askHeroName { name ->
-                        localPlayerName = name
-                        showClassSelection(mode = "raid")
-                    }
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
+            promptBossRaidEntry(fromInAdventure = false)
         }
         btnMenuDifficulty.setOnClickListener {
             showDifficultyPicker(lockForRun = false)
@@ -1280,6 +1251,11 @@ class MainActivity : AppCompatActivity() {
             hideSettingsOverlay()
             showTutorial(0) {}
         }
+        btnSettingsReturnMenu.setOnClickListener { returnToMainMenuSaving(confirm = true) }
+        btnSettingsBossRaid.setOnClickListener {
+            hideSettingsOverlay()
+            promptBossRaidEntry(fromInAdventure = sessionActive)
+        }
         btnSettingsAbandon.setOnClickListener { confirmAbandonAdventure() }
         btnSettingsClose.setOnClickListener { hideSettingsOverlay() }
     }
@@ -1315,6 +1291,8 @@ class MainActivity : AppCompatActivity() {
             gameAudio?.setDmVoiceEnabled(checked)
         }
         btnSettingsAbandon.visibility = if (sessionActive) View.VISIBLE else View.GONE
+        btnSettingsReturnMenu.visibility = if (sessionActive) View.VISIBLE else View.GONE
+        refreshSettingsRaidEntry()
         updateSettingsDifficultyText()
         settingsDifficultyText.setOnClickListener {
             if (sessionActive && runDifficulty >= 0) {
@@ -1374,8 +1352,144 @@ class MainActivity : AppCompatActivity() {
             .apply()
         runDifficulty = -1
         wipeDialogShowing = false
+        storyCompleteRoutesShown = false
         Toast.makeText(this, "Adventure abandoned.", Toast.LENGTH_SHORT).show()
         showStartDialog()
+    }
+
+    /**
+     * Leave the current run for the main menu without wiping Continue / gear /
+     * quest flags / raid keys. Syncs save first so progress survives.
+     */
+    private fun returnToMainMenuSaving(confirm: Boolean) {
+        val leave = {
+            hideSettingsOverlay()
+            if (sessionActive && nativeReady) {
+                markMetaStoryCompleteIfNeeded()
+                try { syncAndSave() } catch (e: Exception) {
+                    Log.e(TAG, "save before main menu failed", e)
+                }
+            }
+            sessionActive = false
+            detachOnlineSession()
+            lastPendingByName.clear()
+            lastLevelUpNotifyKey = ""
+            sheetPulseAnimator?.cancel()
+            prefs().edit().putBoolean("crash_guard", false).apply()
+            runDifficulty = -1
+            wipeDialogShowing = false
+            Toast.makeText(this, "Progress saved.", Toast.LENGTH_SHORT).show()
+            showStartDialog()
+        }
+        if (confirm && sessionActive) {
+            AlertDialog.Builder(this)
+                .setTitle("Return to main menu?")
+                .setMessage(
+                    "Progress is saved (Continue, gear, quest flags, and Raid Keys stay).\n\n" +
+                    "You can open Boss Raid from the main menu when the story is complete."
+                )
+                .setPositiveButton("Main menu") { _, _ -> leave() }
+                .setNegativeButton("Stay", null)
+                .show()
+        } else {
+            leave()
+        }
+    }
+
+    private fun refreshSettingsRaidEntry() {
+        if (!::btnSettingsBossRaid.isInitialized) return
+        syncRaidKeyDay()
+        val storyDone = isMetaStoryComplete()
+        val keys = raidKeysHeld()
+        // Always offer entry while in-adventure (or after story) so locked reason is visible.
+        val show = sessionActive || storyDone
+        btnSettingsBossRaid.visibility = if (show) View.VISIBLE else View.GONE
+        settingsRaidHint.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show) return
+        btnSettingsBossRaid.isEnabled = storyDone
+        btnSettingsBossRaid.alpha = if (storyDone) 1f else 0.45f
+        btnSettingsBossRaid.text = if (storyDone) "Boss Raid ($keys/2 keys)" else "Boss Raid (locked)"
+        settingsRaidHint.text = when {
+            !storyDone -> "Finish the story first (Acts 1–3)"
+            keys <= 0 -> "Need a Raid Key (endgame bosses; max 2/day)"
+            else -> "Costs 1 key · saves adventure, then opens Boss Raid from the menu"
+        }
+    }
+
+    /** Shared Boss Raid entry — preserves story/raid key gates. */
+    private fun promptBossRaidEntry(fromInAdventure: Boolean) {
+        // From an active adventure: save + park on main menu first so Continue/gear stay
+        // intact if the player cancels before spending a key / starting the new run.
+        if (fromInAdventure && sessionActive) {
+            returnToMainMenuSaving(confirm = false)
+            handler.post { promptBossRaidEntry(fromInAdventure = false) }
+            return
+        }
+        if (!isMetaStoryComplete()) {
+            AlertDialog.Builder(this)
+                .setTitle("Boss Raid locked")
+                .setMessage("Finish the story first (Acts 1–3). Boss Raid unlocks after Breach Sealed.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        syncRaidKeyDay()
+        val keys = raidKeysHeld()
+        if (keys <= 0) {
+            AlertDialog.Builder(this)
+                .setTitle("Boss Raid")
+                .setMessage(
+                    "Boss Raid costs 1 Raid Key.\n\n" +
+                    "Keys drop randomly from endgame bosses (deep crawl after story + raid clears).\n" +
+                    "You can hold and be granted at most 2 keys per calendar day."
+                )
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Boss Raid")
+            .setMessage(
+                "Spend 1 Raid Key to enter a focused endgame boss fight?\n\n" +
+                "Keys held: $keys/2\n" +
+                "Rewards: gold, XP, Legendary chance, possible key drop.\n\n" +
+                "Note: starting a raid begins a new run (Continue will track the raid)."
+            )
+            .setPositiveButton("Enter raid") { _, _ ->
+                if (!spendRaidKey()) {
+                    Toast.makeText(this, "No Raid Key.", Toast.LENGTH_SHORT).show()
+                    refreshMainMenuButtons()
+                    return@setPositiveButton
+                }
+                hideMainMenu()
+                askHeroName { name ->
+                    localPlayerName = name
+                    showClassSelection(mode = "raid")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showStoryCompleteRoutesDialog() {
+        if (!sessionActive) return
+        syncRaidKeyDay()
+        val keys = raidKeysHeld()
+        AlertDialog.Builder(this)
+            .setTitle("Story complete!")
+            .setMessage(
+                "Acts 1–3 are finished. Endgame crawl, Legendary gear, and Boss Raids are unlocked.\n\n" +
+                "Raid Keys: $keys/2\n\n" +
+                "Open Boss Raid now, return to the main menu (progress saved), or keep exploring."
+            )
+            .setPositiveButton("Boss Raid") { _, _ ->
+                promptBossRaidEntry(fromInAdventure = true)
+            }
+            .setNeutralButton("Main menu") { _, _ ->
+                returnToMainMenuSaving(confirm = false)
+            }
+            .setNegativeButton("Keep exploring", null)
+            .show()
     }
 
     private fun askHeroName(hint: String = "Your hero name", onName: (String) -> Unit) {
@@ -1442,7 +1556,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Class $which selected. mode=$mode")
             localClassId = which
             when (mode) {
-                "solo", "crawl" -> showCompanionSetup(mode = mode, heroClass = which)
+                "solo", "crawl", "raid" -> showCompanionSetup(mode = mode, heroClass = which)
                 "join" -> {
                     detachOnlineSession()
                     setHost(false)
@@ -1532,6 +1646,7 @@ class MainActivity : AppCompatActivity() {
         runDifficulty = preferredDifficulty.coerceIn(0, 3)
         resetGame(heroClass, localPlayerName, playMode, runDifficulty, companionClass, companionAutoAi)
         setHost(true)
+        storyCompleteRoutesShown = (playMode == 2) // raid already past story gate; no CTA needed
         maybeOfferTutorialThenCoach()
         activateSession()
         btnReset.visibility = View.GONE
@@ -2182,7 +2297,13 @@ class MainActivity : AppCompatActivity() {
     private fun markMetaStoryCompleteIfNeeded() {
         try {
             if (isStoryFullyComplete()) {
+                val wasComplete = prefs().getBoolean("story_fully_complete", false)
                 prefs().edit().putBoolean("story_fully_complete", true).apply()
+                if (!wasComplete && sessionActive && !storyCompleteRoutesShown) {
+                    storyCompleteRoutesShown = true
+                    // Defer so we don't nest dialogs inside the UI tick.
+                    handler.post { showStoryCompleteRoutesDialog() }
+                }
             }
         } catch (_: Exception) { }
     }
@@ -2580,9 +2701,9 @@ class MainActivity : AppCompatActivity() {
             isOnlineClient && remoteDmName.isNotBlank() -> "DM: $remoteDmName · $whose"
             status.contains("Story complete", ignoreCase = true) &&
                 try { isRoomCleared() } catch (_: Exception) { false } ->
-                "Story complete · Search, Rest, or Onward"
+                "Story complete · Menu / Boss Raid / Onward"
             status.contains("Story complete", ignoreCase = true) &&
-                status.contains("endgame", ignoreCase = true) -> "Story complete — endgame unlocked"
+                status.contains("endgame", ignoreCase = true) -> "Story complete — Menu or Boss Raid"
             status.contains("Story complete", ignoreCase = true) -> "Story complete — Acts 1–3"
             status.contains("Mode: Boss Raid", ignoreCase = true) -> "Boss Raid"
             status.contains("Quest: Emberdeep", ignoreCase = true) &&
