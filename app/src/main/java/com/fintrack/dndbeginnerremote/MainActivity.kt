@@ -190,6 +190,8 @@ class MainActivity : AppCompatActivity() {
     external fun doUpgradeEquippedItem(playerName: String, slot: Int): Boolean
     external fun doSellInventoryItem(playerName: String, invIndex: Int): Boolean
     external fun doSellEquippedItem(playerName: String, slot: Int): Boolean
+    external fun doTransferInventoryItemToAlly(playerName: String, invIndex: Int): Boolean
+    external fun doTransferEquippedItemToAlly(playerName: String, slot: Int): Boolean
     external fun isInCombat(): Boolean
     external fun isRoomCleared(): Boolean
     external fun hasSearchedRoom(): Boolean
@@ -2040,6 +2042,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private fun wearerClassLabel(forName: String): String {
+        return try {
+            val sheet = getDetailedSheet(forName)
+            // "Lvl N ClassName | Gold: ..."
+            val line = sheet.lineSequence().firstOrNull { it.contains("Lvl ") && it.contains("|") } ?: return ""
+            val afterLvl = line.substringAfter("Lvl ").trim()
+            val bits = afterLvl.split(Regex("\\s+"))
+            if (bits.size >= 2) bits[1].trim() else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun classLockMessage(itemClass: String): String {
+        val c = itemClass.trim()
+        return when {
+            c.equals("Any", ignoreCase = true) || c.isBlank() -> ""
+            else -> "$c only"
+        }
+    }
+
     private fun showInventoryDialog(forName: String = localPlayerName) {
         if (!nativeReady) {
             Toast.makeText(this, "Native library not loaded — cannot open inventory.", Toast.LENGTH_SHORT).show()
@@ -2102,6 +2126,7 @@ class MainActivity : AppCompatActivity() {
                 val metaTv = row.findViewById<TextView>(R.id.invItemMeta)
                 val equipBtn = row.findViewById<Button>(R.id.invEquipBtn)
                 val upgBtn = row.findViewById<Button>(R.id.invUpgradeBtn)
+                val transferBtn = row.findViewById<Button>(R.id.invTransferBtn)
                 val sellBtn = row.findViewById<Button>(R.id.invSellBtn)
                 val itemLabel = "$name (+$bonus)"
                 nameTv.text = itemLabel
@@ -2111,8 +2136,25 @@ class MainActivity : AppCompatActivity() {
                     "armor" -> "Equipped · Armor"
                     else -> "Bag"
                 }
-                metaTv.text = "$rarity · $cls · $type · $slotLabel · upg $upgLvl · sell ${sellPrice}g"
+                val wearerClass = wearerClassLabel(forName)
+                val classLocked = type != "Potion"
+                    && !cls.equals("Any", ignoreCase = true)
+                    && wearerClass.isNotBlank()
+                    && !cls.equals(wearerClass, ignoreCase = true)
+                val lockMsg = classLockMessage(cls)
+                metaTv.text = buildString {
+                    append("$rarity · $cls · $type · $slotLabel · upg $upgLvl · sell ${sellPrice}g")
+                    if (classLocked) append(" · $lockMsg")
+                }
                 sellBtn.text = "Sell (${sellPrice}g)"
+                val hasAlly = companionNameSafe().isNotBlank()
+                transferBtn.text = "Give to ally"
+                transferBtn.isEnabled = hasAlly
+                if (!hasAlly) {
+                    transferBtn.alpha = 0.45f
+                } else {
+                    transferBtn.alpha = 1f
+                }
                 if (slot == "weapon" || slot == "armor") {
                     equipBtn.text = "Unequip"
                     equipBtn.setOnClickListener {
@@ -2138,6 +2180,20 @@ class MainActivity : AppCompatActivity() {
                             refresh()
                         }
                     }
+                    transferBtn.setOnClickListener {
+                        if (!hasAlly) {
+                            Toast.makeText(this, "No companion to transfer to.", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                        val s = if (slot == "weapon") 0 else 1
+                        val ok = try { doTransferEquippedItemToAlly(forName, s) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Could not transfer." }, Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     sellBtn.setOnClickListener {
                         val s = if (slot == "weapon") 0 else 1
                         confirmSell(itemLabel, sellPrice) {
@@ -2152,14 +2208,25 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } else {
-                    equipBtn.text = "Equip"
-                    equipBtn.setOnClickListener {
-                        val ok = try { doEquipItem(forName, index) } catch (_: Exception) { false }
-                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
-                        if (ok) {
-                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
-                        } else {
-                            Toast.makeText(this, ev.ifBlank { "Cannot equip." }, Toast.LENGTH_SHORT).show()
+                    if (classLocked) {
+                        equipBtn.text = lockMsg.ifBlank { "Class locked" }
+                        equipBtn.isEnabled = false
+                        equipBtn.alpha = 0.45f
+                        equipBtn.setOnClickListener {
+                            Toast.makeText(this, lockMsg.ifBlank { "Wrong class for this gear." }, Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        equipBtn.text = "Equip"
+                        equipBtn.isEnabled = true
+                        equipBtn.alpha = 1f
+                        equipBtn.setOnClickListener {
+                            val ok = try { doEquipItem(forName, index) } catch (_: Exception) { false }
+                            val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                            if (ok) {
+                                syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                            } else {
+                                Toast.makeText(this, ev.ifBlank { "Cannot equip." }, Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                     upgBtn.text = "Upgrade (${upgCost}g)"
@@ -2172,6 +2239,19 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             Toast.makeText(this, ev.ifBlank { "Not enough gold!" }, Toast.LENGTH_SHORT).show()
                             refresh()
+                        }
+                    }
+                    transferBtn.setOnClickListener {
+                        if (!hasAlly) {
+                            Toast.makeText(this, "No companion to transfer to.", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                        val ok = try { doTransferInventoryItemToAlly(forName, index) } catch (_: Exception) { false }
+                        val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                        if (ok) {
+                            syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                        } else {
+                            Toast.makeText(this, ev.ifBlank { "Could not transfer." }, Toast.LENGTH_SHORT).show()
                         }
                     }
                     sellBtn.setOnClickListener {
@@ -2481,6 +2561,9 @@ class MainActivity : AppCompatActivity() {
         if (lastEv.isNotEmpty() && lastEv != lastProcessedEvent) {
             lastProcessedEvent = lastEv
             appendCombatFeed(lastEv)
+            if (lastEv.startsWith("BOSS!") || lastEv.contains("Boss encounter", ignoreCase = true)) {
+                Toast.makeText(this, lastEv, Toast.LENGTH_LONG).show()
+            }
             if (lastEv.contains("Game Over", ignoreCase = true)) {
                 btnReset.visibility = View.VISIBLE
                 handlePartyWipeUi()

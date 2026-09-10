@@ -30,6 +30,9 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     pendingBossXpBonus_ = 0;
     pendingBossLootLuck_ = 0;
     pendingBossGoldBonus_ = 0;
+    bossSeenGk_ = false;
+    bossSeenSk_ = false;
+    bossSeenDrake_ = false;
     while(!visualEvents_.empty()) visualEvents_.pop();
 
     gameOver_ = false;
@@ -175,16 +178,24 @@ void Game::dmAdvanceRoom() {
     roomCount_++;
     roomSearchUsed_ = false;
     spawnRoomContent();
+    const bool bossRoom = hasLivingBossEnemy();
+    const std::string bossToast = lastEvent_;
     if (!isMerchantRoom_) {
-        generateRoomDescription();
-        rollInitiative();
+        if (!bossRoom) generateRoomDescription();
+        if (!enemies_.empty()) rollInitiative();
+        else { turnOrder_.clear(); currentTurnIndex_ = 0; }
     } else {
         turnOrder_.clear();
         currentTurnIndex_ = 0;
     }
-    lastEvent_ = "DM advanced the party to room " + std::to_string(roomCount_) + ".";
-    addChatMessage("System", lastEvent_);
-    dmSay("Onward — a new chamber opens before you.");
+    if (bossRoom && bossToast.rfind("BOSS!", 0) == 0) {
+        lastEvent_ = bossToast;
+        addChatMessage("System", lastEvent_);
+    } else {
+        lastEvent_ = "DM advanced the party to room " + std::to_string(roomCount_) + ".";
+        addChatMessage("System", lastEvent_);
+        dmSay("Onward — a new chamber opens before you.");
+    }
 }
 
 void Game::dmNarrate(const std::string& line) {
@@ -463,6 +474,7 @@ void Game::spawnSoloQuestEnemies() {
             // Medium+: small chance the gallery hosts the Skeleton King (alone). Easy keeps soft pair.
             if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM) && getRandomInt(1, 100) <= 18) {
                 spawnNamedBoss("Skeleton King", 2);
+                lastEvent_ = "BOSS! Skeleton King — stand ready!";
                 dmSay("A crowned horror stirs among the bones — the Skeleton King (original foe).");
             } else {
                 makeFoe("Skeleton", CharacterClass::FIGHTER, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
@@ -489,6 +501,7 @@ void Game::spawnSoloQuestEnemies() {
             // Medium+: rare Goblin King ambush at the weir (Easy keeps soft river goblins).
             if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM) && getRandomInt(1, 100) <= 16) {
                 spawnNamedBoss("Goblin King", 1);
+                lastEvent_ = "BOSS! Goblin King — stand ready!";
                 dmSay("Scrap-iron crown by the millrace — the Goblin King (original) bars the path!");
             } else {
                 makeFoe("River Goblin", CharacterClass::ROGUE, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
@@ -761,23 +774,55 @@ Character* Game::findCharacter(const std::string& name) {
 void Game::restockShop() {
     shopInventory_.clear();
     int depthBonus = std::max(0, roomCount_ / 4);
-    // Mix by rarity: cheaper commons, rarer expensive; class-tagged + any.
+    int preferA = -1, preferB = -1;
+    partyPreferClasses(preferA, preferB);
+
+    auto isPartyClass = [&](int cls) {
+        if (cls < 0) return true; // Any
+        return cls == preferA || cls == preferB;
+    };
+    auto classWeapon = [&](int cls, ItemRarity r, int bonus) {
+        if (cls == 0) return Item::make("Fighter's Arming Sword", ItemType::WEAPON, bonus, r, 0);
+        if (cls == 1) return Item::make("Wizard's Focus Rod", ItemType::WEAPON, bonus, r, 1);
+        if (cls == 2) return Item::make("Rogue's Stiletto", ItemType::WEAPON, bonus, r, 2);
+        return Item::make("Cleric's Warhammer", ItemType::WEAPON, bonus, r, 3);
+    };
+    auto classArmor = [&](int cls, ItemRarity r, int bonus) {
+        if (cls == 0) return Item::make("Knight Plate", ItemType::ARMOR, bonus, r, 0);
+        if (cls == 1) return Item::make("Scholar Robes", ItemType::ARMOR, bonus, r, 1);
+        if (cls == 2) return Item::make("Veil of Shadows", ItemType::ARMOR, bonus, r, 2);
+        return Item::make("Reliquary Mail", ItemType::ARMOR, bonus, r, 3);
+    };
+
+    // Always: Any commons + potions (usable by everyone).
     shopInventory_.push_back(Item::make("Traveler Blade", ItemType::WEAPON, depthBonus, ItemRarity::COMMON, -1));
     shopInventory_.push_back(Item::make("Padded Vest", ItemType::ARMOR, depthBonus, ItemRarity::COMMON, -1));
     shopInventory_.push_back(Item::make("Healing Draught", ItemType::POTION, 8 + depthBonus, ItemRarity::COMMON, -1));
-    shopInventory_.push_back(Item::make("Fighter's Arming Sword", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 0));
-    shopInventory_.push_back(Item::make("Wizard's Focus Rod", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 1));
-    shopInventory_.push_back(Item::make("Rogue's Stiletto", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 2));
-    shopInventory_.push_back(Item::make("Cleric's Warhammer", ItemType::WEAPON, depthBonus + 1, ItemRarity::UNCOMMON, 3));
-    if (roomCount_ >= 6) {
-        shopInventory_.push_back(Item::make("Knight Plate", ItemType::ARMOR, depthBonus + 3, ItemRarity::RARE, 0));
-        shopInventory_.push_back(Item::make("Veil of Shadows", ItemType::ARMOR, depthBonus + 2, ItemRarity::RARE, 2));
-    }
-    if (roomCount_ >= 10) {
-        shopInventory_.push_back(Item::make("Starfire Staff", ItemType::WEAPON, depthBonus + 3, ItemRarity::EPIC, 1));
-        shopInventory_.push_back(Item::make("Reliquary Mail", ItemType::ARMOR, depthBonus + 4, ItemRarity::EPIC, 3));
-    }
     shopInventory_.push_back(Item::make("Greater Potion", ItemType::POTION, 14 + depthBonus, ItemRarity::UNCOMMON, -1));
+
+    // Party-relevant class stock first.
+    if (preferA >= 0) {
+        shopInventory_.push_back(classWeapon(preferA, ItemRarity::UNCOMMON, depthBonus + 1));
+        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferA, ItemRarity::RARE, depthBonus + 3));
+    }
+    if (preferB >= 0 && preferB != preferA) {
+        shopInventory_.push_back(classWeapon(preferB, ItemRarity::UNCOMMON, depthBonus + 1));
+        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferB, ItemRarity::RARE, depthBonus + 2));
+    }
+    // One off-class piece OK (for transfer / future companion swap).
+    int off = -1;
+    for (int c = 0; c < 4; ++c) {
+        if (!isPartyClass(c)) { off = c; break; }
+    }
+    if (off >= 0) {
+        shopInventory_.push_back(classWeapon(off, ItemRarity::UNCOMMON, depthBonus + 1));
+    }
+    if (roomCount_ >= 10 && preferA >= 0) {
+        shopInventory_.push_back(classWeapon(preferA, ItemRarity::EPIC, depthBonus + 3));
+    }
+    if (roomCount_ >= 10 && preferB >= 0) {
+        shopInventory_.push_back(classArmor(preferB, ItemRarity::EPIC, depthBonus + 4));
+    }
 }
 
 bool Game::buyItem(const std::string& playerName, int itemIndex) {
@@ -858,7 +903,7 @@ bool Game::equipInventoryItem(const std::string& playerName, int invIndex) {
         return false;
     }
     if (!item->canEquip(hero->characterClass)) {
-        lastEvent_ = item->name + " is for " + item->classLabel() + "s only.";
+        lastEvent_ = item->classLabel() + " only.";
         return false;
     }
     hero->inventory.erase(hero->inventory.begin() + invIndex);
@@ -980,7 +1025,122 @@ bool Game::sellEquippedItem(const std::string& playerName, int slot) {
     return true;
 }
 
+void Game::partyPreferClasses(int& outA, int& outB) const {
+    outA = -1;
+    outB = -1;
+    if (!players_.empty() && players_[0]) {
+        outA = static_cast<int>(players_[0]->characterClass);
+    }
+    if (Character* c = findNpcCompanion()) {
+        outB = static_cast<int>(c->characterClass);
+    }
+}
+
+Character* Game::findTransferAlly(const Character* from) const {
+    if (!from) return nullptr;
+    // Prefer NPC companion when transferring from the hero.
+    if (Character* npc = findNpcCompanion()) {
+        if (npc != from) return npc;
+    }
+    for (const auto& p : players_) {
+        if (p && p.get() != from) return p.get();
+    }
+    return nullptr;
+}
+
+void Game::deliverItemToAlly(Character* ally, std::shared_ptr<Item> item) {
+    if (!ally || !item) return;
+    if (item->type == ItemType::POTION) {
+        ally->addToInventory(item);
+        return;
+    }
+    if (item->canEquip(ally->characterClass)) {
+        if (item->type == ItemType::WEAPON) {
+            if (ally->equippedWeapon) ally->addToInventory(ally->equippedWeapon);
+            ally->equippedWeapon = item;
+            return;
+        }
+        if (item->type == ItemType::ARMOR) {
+            if (ally->equippedArmor) ally->addToInventory(ally->equippedArmor);
+            ally->equippedArmor = item;
+            ally->calculateAC();
+            return;
+        }
+    }
+    ally->addToInventory(item);
+}
+
+bool Game::transferInventoryItemToAlly(const std::string& fromName, int invIndex) {
+    if (gameOver_) return false;
+    Character* from = findCharacter(fromName);
+    if (!from || from->isDead) return false;
+    Character* ally = findTransferAlly(from);
+    if (!ally) {
+        lastEvent_ = "No companion to transfer to.";
+        return false;
+    }
+    if (invIndex < 0 || static_cast<size_t>(invIndex) >= from->inventory.size()) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    auto item = from->inventory[static_cast<size_t>(invIndex)];
+    if (!item) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    from->inventory.erase(from->inventory.begin() + invIndex);
+    std::string label = item->getDescription();
+    bool equipped = item->canEquip(ally->characterClass) && item->type != ItemType::POTION;
+    deliverItemToAlly(ally, item);
+    if (equipped) {
+        lastEvent_ = from->name + " gives " + label + " to " + ally->name + " (equipped).";
+    } else {
+        lastEvent_ = from->name + " gives " + label + " to " + ally->name + ".";
+    }
+    dmSay(lastEvent_);
+    addJournalEntry(lastEvent_);
+    return true;
+}
+
+bool Game::transferEquippedItemToAlly(const std::string& fromName, int slot) {
+    if (gameOver_) return false;
+    Character* from = findCharacter(fromName);
+    if (!from || from->isDead) return false;
+    Character* ally = findTransferAlly(from);
+    if (!ally) {
+        lastEvent_ = "No companion to transfer to.";
+        return false;
+    }
+    std::shared_ptr<Item>* ptr = (slot == 0) ? &from->equippedWeapon : (slot == 1 ? &from->equippedArmor : nullptr);
+    if (!ptr || !*ptr) {
+        lastEvent_ = "Nothing equipped there.";
+        return false;
+    }
+    auto item = *ptr;
+    *ptr = nullptr;
+    if (slot == 1) from->calculateAC();
+    std::string label = item->getDescription();
+    bool willEquip = item->canEquip(ally->characterClass);
+    deliverItemToAlly(ally, item);
+    if (willEquip) {
+        lastEvent_ = from->name + " gives " + label + " to " + ally->name + " (equipped).";
+    } else {
+        lastEvent_ = from->name + " gives " + label + " to " + ally->name + ".";
+    }
+    dmSay(lastEvent_);
+    addJournalEntry(lastEvent_);
+    return true;
+}
+
+void Game::markBossSeen(const std::string& name) {
+    int tier = LootSystem::bossTier(name);
+    if (tier == 1) bossSeenGk_ = true;
+    else if (tier == 2) bossSeenSk_ = true;
+    else if (tier >= 3) bossSeenDrake_ = true;
+}
+
 void Game::spawnNamedBoss(const std::string& name, int tier) {
+    markBossSeen(name);
     CharacterClass cl = CharacterClass::FIGHTER;
     if (tier == 1) cl = CharacterClass::ROGUE;
     else if (tier == 3) cl = CharacterClass::WIZARD;
@@ -1010,35 +1170,28 @@ void Game::spawnNamedBoss(const std::string& name, int tier) {
     enemies_.push_back(std::move(foe));
 }
 
+bool Game::hasLivingBossEnemy() const {
+    for (const auto& e : enemies_) {
+        if (e && !e->isDead && LootSystem::isBossName(e->name)) return true;
+    }
+    return false;
+}
+
 void Game::maybeSpawnBossEncounter() {
     // Never soft-lock early story beginners: only procedural crawl / post-quest rooms.
     if (isSoloQuestScripted()) return;
-    if (roomCount_ < 6) return;
 
-    int roll = getRandomInt(1, 100);
-    // Ashen Drake (Dragon) — late gate only
-    int dragonNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 18 : 16;
-    if (roomCount_ >= dragonNeed && roll <= 10) {
-        spawnNamedBoss("Ashen Drake", 3);
-        roomDescription_ = "The chamber opens into a scorched hollow. An Ashen Drake coils around a cracked pillar — heat warps the air.";
-        dmSay("Original menace: the Ashen Drake (not from any published module). Stand ready — this is a late-game trial.");
-        addJournalEntry("Boss: Ashen Drake stirs in the deep.");
-        return;
-    }
-    // Skeleton King — mid-deep
-    int skNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 12 : 10;
-    if (roomCount_ >= skNeed && roll <= 18) {
-        spawnNamedBoss("Skeleton King", 2);
-        roomDescription_ = "Bone thrones and rusted crowns litter the floor. The Skeleton King rises, empty eyes fixed on you.";
-        dmSay("The Skeleton King claims this ossuary. Original foe — fight smart.");
-        addJournalEntry("Boss: Skeleton King.");
-        return;
-    }
-    // Goblin King — earliest boss, still gated
-    int gkNeed = (difficulty_ <= static_cast<int>(Difficulty::EASY)) ? 8 : 6;
-    if (roomCount_ >= gkNeed && roll <= 22) {
+    const bool easy = difficulty_ <= static_cast<int>(Difficulty::EASY);
+    // Tuned gates (was Easy GK@8/22%, SK@12/18%, Drake@18/10% — too rare by room 20).
+    const int gkNeed = easy ? 5 : 4;
+    const int skNeed = easy ? 9 : 8;
+    const int dragonNeed = easy ? 14 : 12;
+    const int gkChance = easy ? 32 : 34;
+    const int skChance = easy ? 26 : 28;
+    const int dragonChance = easy ? 14 : 16;
+
+    auto spawnGkCourt = [&]() {
         spawnNamedBoss("Goblin King", 1);
-        // Add a weak attendant on Medium+ so it feels like a court, not a brick wall alone on Easy.
         if (difficulty_ >= static_cast<int>(Difficulty::MEDIUM)) {
             auto scout = std::make_unique<Character>("Goblin Scout", CharacterClass::ROGUE, "gk-scout-" + std::to_string(getRandomInt(0, 1000000)));
             scout->maxHp = std::max(4, scout->maxHp - 4);
@@ -1046,8 +1199,41 @@ void Game::maybeSpawnBossEncounter() {
             enemies_.push_back(std::move(scout));
         }
         roomDescription_ = "Crude banners hang from spikes. The Goblin King bellows a challenge from a scrap-iron throne.";
+        lastEvent_ = "BOSS! Goblin King — stand ready!";
         dmSay("The Goblin King! Original boss — richer spoils if you prevail.");
         addJournalEntry("Boss: Goblin King.");
+    };
+
+    // Guaranteed Goblin King by room 10 if none seen yet (first eligible crawl/post-quest combat room).
+    if (roomCount_ >= 10 && !bossSeenGk_) {
+        spawnGkCourt();
+        return;
+    }
+
+    if (roomCount_ < gkNeed) return;
+
+    int roll = getRandomInt(1, 100);
+    // Ashen Drake (Dragon) — late gate
+    if (roomCount_ >= dragonNeed && roll <= dragonChance) {
+        spawnNamedBoss("Ashen Drake", 3);
+        roomDescription_ = "The chamber opens into a scorched hollow. An Ashen Drake coils around a cracked pillar — heat warps the air.";
+        lastEvent_ = "BOSS! Ashen Drake — stand ready!";
+        dmSay("Original menace: the Ashen Drake (not from any published module). Stand ready — this is a late-game trial.");
+        addJournalEntry("Boss: Ashen Drake stirs in the deep.");
+        return;
+    }
+    // Skeleton King — mid-deep
+    if (roomCount_ >= skNeed && roll <= skChance) {
+        spawnNamedBoss("Skeleton King", 2);
+        roomDescription_ = "Bone thrones and rusted crowns litter the floor. The Skeleton King rises, empty eyes fixed on you.";
+        lastEvent_ = "BOSS! Skeleton King — stand ready!";
+        dmSay("The Skeleton King claims this ossuary. Original foe — fight smart.");
+        addJournalEntry("Boss: Skeleton King.");
+        return;
+    }
+    // Goblin King — earliest boss
+    if (roomCount_ >= gkNeed && roll <= gkChance) {
+        spawnGkCourt();
     }
 }
 
@@ -1154,8 +1340,9 @@ void Game::rollbackOneRoomOrBeat() {
 
     if (roomCount_ > 1) roomCount_--;
     spawnRoomContent();
+    const bool bossRoom = hasLivingBossEnemy();
     if (!isMerchantRoom_) {
-        generateRoomDescription();
+        if (!bossRoom) generateRoomDescription();
         if (!enemies_.empty()) rollInitiative();
         else { turnOrder_.clear(); currentTurnIndex_ = 0; }
     } else {
@@ -1225,15 +1412,16 @@ void Game::enterClearedRoom(Character* actor) {
     if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::LANTERN_VAULT) {
         grantAshenLantern(actor);
     } else if (actor && !actor->isDead) {
-        int prefer = static_cast<int>(actor->characterClass);
-        auto loot = LootSystem::generateLoot(roomCount_, luck, prefer);
+        int preferA = -1, preferB = -1;
+        partyPreferClasses(preferA, preferB);
+        auto loot = LootSystem::generateLoot(roomCount_, luck, preferA, preferB);
         if (loot) {
             actor->addToInventory(loot);
             dmSay(actor->name + " finds " + loot->getDescription() + " [" + loot->rarityLabel() + "] — check Inventory.");
             addJournalEntry(actor->name + " found loot: " + loot->getDescription() + " (" + loot->rarityLabel() + ")");
         } else if (luck > 0) {
             // Boss clears always drop something when luck was banked but roll missed — guarantee uncommon+.
-            auto pity = LootSystem::generateLoot(roomCount_, 80, prefer);
+            auto pity = LootSystem::generateLoot(roomCount_, 80, preferA, preferB);
             if (pity) {
                 actor->addToInventory(pity);
                 dmSay(actor->name + " claims a boss trophy: " + pity->getDescription() + " [" + pity->rarityLabel() + "].");
@@ -1638,10 +1826,17 @@ void Game::playerRest(bool force) {
     if (isMerchantRoom_) {
         roomCount_++;
         spawnRoomContent();
-        generateRoomDescription();
-        rollInitiative();
-        lastEvent_ = "You bid the merchant farewell and press deeper.";
-        dmSay("The merchant nods. \"Luck in the dark, friends.\"");
+        const bool bossRoom = hasLivingBossEnemy();
+        const std::string bossToast = lastEvent_;
+        if (!bossRoom) generateRoomDescription();
+        if (!enemies_.empty()) rollInitiative();
+        else { turnOrder_.clear(); currentTurnIndex_ = 0; }
+        if (bossRoom && bossToast.rfind("BOSS!", 0) == 0) {
+            lastEvent_ = bossToast;
+        } else {
+            lastEvent_ = "You bid the merchant farewell and press deeper.";
+            dmSay("The merchant nods. \"Luck in the dark, friends.\"");
+        }
         return;
     }
     // Short Rest (5e-inspired): spend hit dice vibe — recover half missing HP + some features
@@ -1785,17 +1980,24 @@ void Game::playerAdvanceFromCleared() {
         roomCount_++;
         roomSearchUsed_ = false;
         spawnRoomContent();
+        const bool bossRoom = hasLivingBossEnemy();
+        const std::string bossToast = lastEvent_;
         if (!isMerchantRoom_) {
-            generateRoomDescription();
+            if (!bossRoom) generateRoomDescription();
             if (!enemies_.empty()) rollInitiative();
             else { turnOrder_.clear(); currentTurnIndex_ = 0; }
         } else {
             turnOrder_.clear();
             currentTurnIndex_ = 0;
         }
-        lastEvent_ = "Story complete — deeper rooms await. Room " + std::to_string(roomCount_) + ".";
-        addChatMessage("Quest", "Acts complete — continuing into unscripted chambers.");
-        dmSay("Beyond Millhollow's green, the wilds open again. Both debts of light and grain are settled — adventure is not.");
+        if (bossRoom && bossToast.rfind("BOSS!", 0) == 0) {
+            lastEvent_ = bossToast;
+            addChatMessage("Quest", lastEvent_);
+        } else {
+            lastEvent_ = "Story complete — deeper rooms await. Room " + std::to_string(roomCount_) + ".";
+            addChatMessage("Quest", "Acts complete — continuing into unscripted chambers.");
+            dmSay("Beyond Millhollow's green, the wilds open again. Both debts of light and grain are settled — adventure is not.");
+        }
         addJournalEntry("Post-story exploration begins (Acts 1–2 done).");
         return;
     }
@@ -1803,17 +2005,26 @@ void Game::playerAdvanceFromCleared() {
     roomCount_++;
     roomSearchUsed_ = false;
     spawnRoomContent();
+    const bool bossRoom = hasLivingBossEnemy();
+    const std::string bossToast = lastEvent_;
     if (!isMerchantRoom_) {
-        generateRoomDescription();
-        rollInitiative();
+        if (!bossRoom) generateRoomDescription();
+        if (!enemies_.empty()) rollInitiative();
+        else { turnOrder_.clear(); currentTurnIndex_ = 0; }
     } else {
         turnOrder_.clear();
         currentTurnIndex_ = 0;
     }
-    lastEvent_ = "You press deeper into the dungeon… Room " + std::to_string(roomCount_) + ".";
-    addChatMessage("Combat", lastEvent_);
-    dmSay("Onward — a new chamber opens before you.");
-    addJournalEntry("The party advanced to room " + std::to_string(roomCount_) + ".");
+    if (bossRoom && bossToast.rfind("BOSS!", 0) == 0) {
+        lastEvent_ = bossToast;
+        addChatMessage("Combat", lastEvent_);
+        addJournalEntry("The party advanced to room " + std::to_string(roomCount_) + " (boss).");
+    } else {
+        lastEvent_ = "You press deeper into the dungeon… Room " + std::to_string(roomCount_) + ".";
+        addChatMessage("Combat", lastEvent_);
+        dmSay("Onward — a new chamber opens before you.");
+        addJournalEntry("The party advanced to room " + std::to_string(roomCount_) + ".");
+    }
 }
 
 void Game::playerIncreaseStat(const std::string& playerName, int statIndex) {
@@ -2111,7 +2322,8 @@ std::string Game::serialize() {
        << "," << questBeat_ << "," << (questLanternRecovered_ ? 1 : 0) << "," << (questComplete_ ? 1 : 0)
        << "," << (questCryptKeyFound_ ? 1 : 0)
        << "," << (questAct2Complete_ ? 1 : 0) << "," << (questAct2LedgerFound_ ? 1 : 0)
-       << "," << soloPlayMode_ << "," << difficulty_ << "|";
+       << "," << soloPlayMode_ << "," << difficulty_
+       << "," << (bossSeenGk_ ? 1 : 0) << "," << (bossSeenSk_ ? 1 : 0) << "," << (bossSeenDrake_ ? 1 : 0) << "|";
     // Section 1: Descriptions
     ss << roomDescription_ << "~" << lastEvent_ << "|";
     // Section 2: Players
@@ -2157,6 +2369,9 @@ void Game::deserialize(const std::string& data) {
     pendingBossXpBonus_ = 0;
     pendingBossLootLuck_ = 0;
     pendingBossGoldBonus_ = 0;
+    bossSeenGk_ = false;
+    bossSeenSk_ = false;
+    bossSeenDrake_ = false;
     shopInventory_.clear();
 
     std::stringstream ss(data);
@@ -2195,6 +2410,12 @@ void Game::deserialize(const std::string& data) {
             if (std::getline(ss_sub, val, ',')) difficulty_ = std::stoi(val);
             else difficulty_ = static_cast<int>(Difficulty::EASY);
             if (difficulty_ < 0 || difficulty_ > 3) difficulty_ = static_cast<int>(Difficulty::EASY);
+            if (std::getline(ss_sub, val, ',')) bossSeenGk_ = (val == "1");
+            else bossSeenGk_ = false;
+            if (std::getline(ss_sub, val, ',')) bossSeenSk_ = (val == "1");
+            else bossSeenSk_ = false;
+            if (std::getline(ss_sub, val, ',')) bossSeenDrake_ = (val == "1");
+            else bossSeenDrake_ = false;
         }
     }
 

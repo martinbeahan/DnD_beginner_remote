@@ -71,6 +71,9 @@ public:
     bool upgradeEquippedItem(const std::string& playerName, int slot); // 0=weapon, 1=armor
     bool sellInventoryItem(const std::string& playerName, int invIndex);
     bool sellEquippedItem(const std::string& playerName, int slot); // 0=weapon, 1=armor; unequips then sells
+    /** Move bag/equipped gear to the other party member (hero↔companion). Blocks if no ally. */
+    bool transferInventoryItemToAlly(const std::string& fromName, int invIndex);
+    bool transferEquippedItemToAlly(const std::string& fromName, int slot); // 0=weapon, 1=armor
 
     // Turn Management
     void processTurn();
@@ -165,6 +168,9 @@ private:
     int pendingBossXpBonus_ = 0;
     int pendingBossLootLuck_ = 0;
     int pendingBossGoldBonus_ = 0;
+    bool bossSeenGk_ = false;
+    bool bossSeenSk_ = false;
+    bool bossSeenDrake_ = false;
 
     int turnCounter_;
     int roomCount_;
@@ -205,7 +211,12 @@ private:
     void restockShop();
     void maybeSpawnBossEncounter();
     void spawnNamedBoss(const std::string& name, int tier);
+    void markBossSeen(const std::string& name);
+    bool hasLivingBossEnemy() const;
     void noteBossDefeat(const std::string& foeName);
+    Character* findTransferAlly(const Character* from) const;
+    void deliverItemToAlly(Character* ally, std::shared_ptr<Item> item);
+    void partyPreferClasses(int& outA, int& outB) const;
     void dmSay(const std::string& line);
     void resetSoloQuestState();
     void applySoloQuestRoom();

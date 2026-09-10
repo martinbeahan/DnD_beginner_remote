@@ -503,8 +503,13 @@ public:
 
 class LootSystem {
 public:
-    /** luckBonus: 0 normal; bosses add 20–50 to favor Rare/Epic. preferClass: optional class tag for gear. */
-    static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0, int preferClass = -1) {
+    /**
+     * luckBonus: 0 normal; bosses add 20–50 to favor Rare/Epic.
+     * preferClass / preferClass2: party class tags (-1 = unused). Strongly bias toward party
+     * classes; "Any" remains common; off-party class gear is rare (still useful for transfer).
+     */
+    static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0,
+                                              int preferClass = -1, int preferClass2 = -1) {
         int roll = (rand() % 100) + luckBonus;
         if (roll < 55) return nullptr; // often nothing on normal clears
 
@@ -516,9 +521,40 @@ public:
         int bonus = (roomDepth / 5) + static_cast<int>(rarity);
         if (bonus < 0) bonus = 0;
         bool weapon = (rand() % 2) == 0;
-        int cls = preferClass;
-        if (cls < 0 && (rand() % 100) < 40) cls = rand() % 4; // sometimes class-tagged
-        else if ((rand() % 100) < 45) cls = -1;
+
+        // Build party class list (unique).
+        int party[4];
+        int partyN = 0;
+        auto pushParty = [&](int c) {
+            if (c < 0 || c > 3) return;
+            for (int i = 0; i < partyN; ++i) if (party[i] == c) return;
+            party[partyN++] = c;
+        };
+        pushParty(preferClass);
+        pushParty(preferClass2);
+
+        int cls = -1;
+        int pick = rand() % 100;
+        if (partyN > 0) {
+            // ~62% party-tagged, ~30% Any, ~8% off-party (for ally transfer interest).
+            if (pick < 62) {
+                cls = party[rand() % partyN];
+            } else if (pick < 92) {
+                cls = -1;
+            } else {
+                int off[4];
+                int offN = 0;
+                for (int c = 0; c < 4; ++c) {
+                    bool in = false;
+                    for (int i = 0; i < partyN; ++i) if (party[i] == c) { in = true; break; }
+                    if (!in) off[offN++] = c;
+                }
+                cls = (offN > 0) ? off[rand() % offN] : -1;
+            }
+        } else {
+            if (pick < 40) cls = rand() % 4;
+            else cls = -1;
+        }
 
         if (weapon) {
             const char* names[] = {"Steel Blade", "Runed Blade", "Shadow Dirk", "War Maul", "Arcane Wand"};
