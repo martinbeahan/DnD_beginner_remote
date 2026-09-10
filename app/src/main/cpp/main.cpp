@@ -286,7 +286,23 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_doUpgradeEquippedItem(JNIEnv *e
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doSellInventoryItem(JNIEnv *env, jobject thiz, jstring playerName, jint invIndex) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.sellInventoryItem(nativeName ? nativeName : "", invIndex);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
 
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_doSellEquippedItem(JNIEnv *env, jobject thiz, jstring playerName, jint slot) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    const char *nativeName = env->GetStringUTFChars(playerName, nullptr);
+    bool ok = g_Game.sellEquippedItem(nativeName ? nativeName : "", slot);
+    env->ReleaseStringUTFChars(playerName, nativeName);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
 
 JNIEXPORT void JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_setHost(JNIEnv *env, jobject thiz, jboolean isHost) {

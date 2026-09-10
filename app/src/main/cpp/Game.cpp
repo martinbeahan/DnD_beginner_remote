@@ -828,10 +828,12 @@ std::string Game::getInventoryManifest(const std::string& playerName) const {
     std::stringstream ss;
     auto emit = [&](const std::shared_ptr<Item>& it, const char* slot, int index) {
         if (!it) return;
+        // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost|sellPrice
         ss << index << ":" << it->name << "|" << it->bonus << "|"
            << (it->type == ItemType::WEAPON ? "Weapon" : (it->type == ItemType::ARMOR ? "Armor" : "Potion"))
            << "|" << it->rarityLabel() << "|" << it->classLabel() << "|" << slot
-           << "|" << it->upgradeLevel << "|" << it->upgradeCost() << ";";
+           << "|" << it->upgradeLevel << "|" << it->upgradeCost()
+           << "|" << it->sellPrice() << ";";
     };
     // Equipped first with negative-ish slots encoded as weapon/armor indices in slot field
     emit(hero->equippedWeapon, "weapon", -1);
@@ -931,6 +933,50 @@ bool Game::upgradeEquippedItem(const std::string& playerName, int slot) {
     lastEvent_ = hero->name + " upgrades " + (*ptr)->name + " to +" + std::to_string((*ptr)->bonus)
         + " for " + std::to_string(cost) + "g.";
     addJournalEntry(lastEvent_);
+    return true;
+}
+
+bool Game::sellInventoryItem(const std::string& playerName, int invIndex) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    if (invIndex < 0 || static_cast<size_t>(invIndex) >= hero->inventory.size()) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    auto item = hero->inventory[static_cast<size_t>(invIndex)];
+    if (!item) {
+        lastEvent_ = "No such item.";
+        return false;
+    }
+    int price = item->sellPrice();
+    std::string itemName = item->getDescription();
+    hero->inventory.erase(hero->inventory.begin() + invIndex);
+    hero->gold += price;
+    lastEvent_ = hero->name + " sells " + itemName + " for " + std::to_string(price) + "g.";
+    addJournalEntry(lastEvent_);
+    return true;
+}
+
+bool Game::sellEquippedItem(const std::string& playerName, int slot) {
+    if (gameOver_) return false;
+    Character* hero = findCharacter(playerName);
+    if (!hero || hero->isDead) return false;
+    std::shared_ptr<Item>* ptr = (slot == 0) ? &hero->equippedWeapon : (slot == 1 ? &hero->equippedArmor : nullptr);
+    if (!ptr || !*ptr) {
+        lastEvent_ = "Nothing equipped there.";
+        return false;
+    }
+    auto item = *ptr;
+    int price = item->sellPrice();
+    std::string itemName = item->getDescription();
+    // Unequip first: clear slot so combat falls back to fists / unarmored AC.
+    *ptr = nullptr;
+    if (slot == 1) hero->calculateAC();
+    hero->gold += price;
+    lastEvent_ = hero->name + " sells " + itemName + " for " + std::to_string(price) + "g."
+        + (slot == 0 ? " (fists ready)" : "");
+    addJournalEntry(hero->name + " sold equipped " + itemName + " for " + std::to_string(price) + "g.");
     return true;
 }
 

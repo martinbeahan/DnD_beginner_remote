@@ -29,3 +29,7 @@ Stats persist, multi-point level-up, XP bar, companion Auto/Player, difficulty w
 4. Clear rooms / bosses: loot in bag; Continue keeps inventory.
 5. Crawl deep for Goblin/Skeleton King / Ashen Drake; Easy stays gentler early.
 6. Regression: XP bar, level-up, companion, audio, graphics, Host DM.
+
+## See also
+
+Inventory Sell (v2.3): `docs/INVENTORY_SELL.md`.

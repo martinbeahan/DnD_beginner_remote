@@ -95,6 +95,16 @@ struct Item {
         return rarityBase * (upgradeLevel + 1) * (1 + bonus / 2);
     }
 
+    /** Sell-back gold: fair fraction of shop value, scaled by rarity + upgrades (~40–60%). */
+    int sellPrice() const {
+        int buy = shopCost();
+        // Common 40%, Uncommon 45%, Rare 50%, Epic 55%; +2% per upgrade tier, cap 60%.
+        int pct = 40 + static_cast<int>(rarity) * 5 + upgradeLevel * 2;
+        if (pct > 60) pct = 60;
+        int price = (buy * pct) / 100;
+        return std::max(1, price);
+    }
+
     std::string getDescription() const {
         std::stringstream ss;
         ss << name;
