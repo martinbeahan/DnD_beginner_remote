@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true"
-        android:padding="16dp">
+        android:padding="12dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -21,9 +21,12 @@
             android:gravity="center_horizontal"
             android:layout_gravity="center"
             android:background="@drawable/bg_menu_panel"
-            android:padding="20dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="24dp">
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="14dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="12dp">
 
             <TextView
                 android:id="@+id/mainMenuTitle"
@@ -33,10 +36,10 @@
                 android:fontFamily="serif"
                 android:text="D&amp;D Beginner"
                 android:textColor="@color/ink"
-                android:textSize="28sp"
+                android:textSize="26sp"
                 android:letterSpacing="0.02"
                 android:textStyle="bold"
-                android:paddingBottom="4dp" />
+                android:paddingBottom="2dp" />
 
             <TextView
                 android:id="@+id/mainMenuSubtitle"
@@ -46,15 +49,26 @@
                 android:fontFamily="serif"
                 android:text="Choose your path"
                 android:textColor="@color/ink"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="italic"
-                android:paddingBottom="8dp" />
+                android:paddingBottom="6dp" />
 
             <View
-                android:layout_width="120dp"
+                android:layout_width="100dp"
                 android:layout_height="2dp"
-                android:layout_marginBottom="12dp"
-                android:background="@color/gold" />
+                android:layout_marginBottom="10dp"
+                android:background="@drawable/bg_section_rule" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="DIFFICULTY"
+                android:textColor="@color/ink"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:paddingBottom="2dp" />
 
             <TextView
                 android:id="@+id/mainMenuDifficultyLabel"
@@ -71,8 +85,8 @@
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginBottom="12dp"
+                android:minHeight="44dp"
+                android:layout_marginBottom="10dp"
                 android:text="Change difficulty"
                 android:textSize="13sp" />
 
@@ -81,19 +95,31 @@
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
-                android:layout_marginBottom="8dp"
+                android:minHeight="48dp"
+                android:layout_marginBottom="6dp"
                 android:text="Continue"
                 android:textSize="14sp"
                 android:visibility="gone" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="PLAY"
+                android:textColor="@color/ink"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:paddingTop="2dp"
+                android:paddingBottom="4dp" />
 
             <Button
                 android:id="@+id/btnMenuSolo"
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
-                android:layout_marginBottom="8dp"
+                android:minHeight="48dp"
+                android:layout_marginBottom="6dp"
                 android:text="Story adventure"
                 android:textSize="14sp" />
 
@@ -102,8 +128,8 @@
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
-                android:layout_marginBottom="8dp"
+                android:minHeight="48dp"
+                android:layout_marginBottom="6dp"
                 android:text="Dungeon Crawl"
                 android:textSize="14sp" />
 
@@ -112,8 +138,8 @@
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
-                android:layout_marginBottom="8dp"
+                android:minHeight="48dp"
+                android:layout_marginBottom="6dp"
                 android:text="Host online (DM)"
                 android:textSize="14sp" />
 
@@ -122,29 +148,35 @@
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
+                android:minHeight="48dp"
                 android:layout_marginBottom="8dp"
                 android:text="Join session"
                 android:textSize="14sp" />
+
+            <View
+                android:layout_width="80dp"
+                android:layout_height="1dp"
+                android:layout_marginBottom="8dp"
+                android:background="#558B6914" />
 
             <Button
                 android:id="@+id/btnMenuSettings"
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
-                android:layout_marginBottom="8dp"
+                android:minHeight="44dp"
+                android:layout_marginBottom="6dp"
                 android:text="Settings"
-                android:textSize="14sp" />
+                android:textSize="13sp" />
 
             <Button
                 android:id="@+id/btnMenuQuit"
                 style="@style/Widget.DnD.ActionButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
+                android:minHeight="44dp"
                 android:text="Quit (background)"
-                android:textSize="14sp" />
+                android:textSize="13sp" />
         </LinearLayout>
     </ScrollView>
 </FrameLayout>

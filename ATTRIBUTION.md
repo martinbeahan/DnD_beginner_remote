@@ -76,6 +76,17 @@ Expanded Act 2 / crawl stage chrome and combat feedback. Still **CC0 / original 
 
 Layered stage XML adds a cheap top/bottom shade (pseudo-depth) over the battlebacks. Portrait frames, menu/settings panels, screen flash, and floating damage numbers are original UI chrome.
 
+### Richer 2D / UI polish (v2.5)
+
+Visual-only pass — same CC0 sources, higher encode quality and cleaner chrome. No WotC art.
+
+| Asset in app | Change | License |
+|---|---|---|
+| `bg_battle_*.webp` | Re-encoded Nidhoggn / quantumelle / ansimuz battlebacks at 960×540, higher WebP quality | CC0 (sources above) |
+| `bg_battle_boss.webp` | New boss-room stage from Nidhoggn battleback4 | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) — https://opengameart.org/content/backgrounds-3 |
+| `sprite_*.png` / `*_atk.png` | Re-extracted LuizMelo / Tiny Creatures / Pet Dogs frames with readability outline | CC0 (packs above) |
+| HUD / panels / HP / XP / selection / damage float XML | Original UI chrome (double-frame stages, turn banner, crit float) | Original |
+
 ### Not used
 
 No scraped D&D / WotC official art, Critical Role stills, or commercial game sprites.

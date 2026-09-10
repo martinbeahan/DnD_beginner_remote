@@ -4,16 +4,26 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/bg_dungeon_panel"
-    android:padding="14dp">
+    android:padding="12dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="INVENTORY"
+        android:textColor="@color/gold"
+        android:textStyle="bold"
+        android:textSize="11sp"
+        android:letterSpacing="0.08"
+        android:paddingBottom="2dp" />
 
     <TextView
         android:id="@+id/invGoldText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@color/gold"
+        android:textColor="@color/gold_bright"
         android:textStyle="bold"
         android:textSize="15sp"
-        android:paddingBottom="4dp" />
+        android:paddingBottom="2dp" />
 
     <TextView
         android:id="@+id/invHintText"
@@ -21,6 +31,7 @@
         android:layout_height="wrap_content"
         android:textColor="@color/parchment_dark"
         android:textSize="11sp"
+        android:lineSpacingExtra="1dp"
         android:paddingBottom="8dp"
         android:text="Equip class-tagged gear only if it matches your class. Upgrade spends gold. Sell returns gold (confirm)." />
 

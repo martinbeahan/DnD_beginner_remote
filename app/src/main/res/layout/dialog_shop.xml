@@ -4,13 +4,23 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/bg_dungeon_panel"
-    android:padding="14dp">
+    android:padding="12dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="MERCHANT"
+        android:textColor="@color/gold"
+        android:textStyle="bold"
+        android:textSize="11sp"
+        android:letterSpacing="0.08"
+        android:paddingBottom="2dp" />
 
     <TextView
         android:id="@+id/shopGoldText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@color/gold"
+        android:textColor="@color/gold_bright"
         android:textStyle="bold"
         android:textSize="15sp"
         android:paddingBottom="8dp" />

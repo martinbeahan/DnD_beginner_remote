@@ -9,15 +9,25 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@drawable/bg_dungeon_panel"
-        android:padding="16dp">
+        android:padding="14dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="LEVEL UP"
+            android:textColor="@color/gold"
+            android:textStyle="bold"
+            android:textSize="11sp"
+            android:letterSpacing="0.08"
+            android:paddingBottom="2dp" />
 
         <TextView
             android:id="@+id/levelUpRemaining"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/gold"
+            android:textColor="@color/gold_bright"
             android:textStyle="bold"
-            android:textSize="15sp"
+            android:textSize="16sp"
             android:text="Points remaining: 0" />
 
         <TextView
@@ -27,6 +37,7 @@
             android:layout_marginTop="4dp"
             android:textColor="@color/parchment"
             android:textSize="12sp"
+            android:lineSpacingExtra="1dp"
             android:text="Tap + / − on each attribute, then Confirm once. You may spend any or all points." />
 
         <TextView
@@ -42,7 +53,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginTop="12dp" />
+            android:layout_marginTop="10dp" />
 
         <Button
             android:id="@+id/levelUpConfirm"

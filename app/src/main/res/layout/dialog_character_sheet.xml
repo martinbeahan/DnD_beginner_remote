@@ -9,7 +9,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@drawable/bg_dungeon_panel"
-        android:padding="16dp">
+        android:padding="14dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -19,9 +19,9 @@
 
             <ImageView
                 android:id="@+id/sheetPortrait"
-                android:layout_width="80dp"
-                android:layout_height="80dp"
-                android:padding="6dp"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:padding="5dp"
                 android:background="@drawable/bg_portrait_frame"
                 android:contentDescription="Portrait"
                 android:scaleType="fitCenter" />
@@ -31,15 +31,15 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:orientation="vertical"
-                android:layout_marginStart="12dp">
+                android:layout_marginStart="10dp">
 
                 <TextView
                     android:id="@+id/sheetName"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/gold"
+                    android:textColor="@color/gold_bright"
                     android:textStyle="bold"
-                    android:textSize="18sp"
+                    android:textSize="17sp"
                     android:maxLines="1"
                     android:ellipsize="end" />
 
@@ -48,7 +48,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="@color/parchment"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:maxLines="1"
                     android:ellipsize="end" />
 
@@ -57,7 +57,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="@color/gold"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:layout_marginTop="2dp" />
             </LinearLayout>
         </LinearLayout>
@@ -66,17 +66,18 @@
             android:id="@+id/sheetHpLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:text="HP"
             android:textColor="@color/parchment"
-            android:textSize="12sp" />
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
         <ProgressBar
             android:id="@+id/sheetHpBar"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
             android:layout_height="14dp"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="3dp"
             android:max="100"
             android:progress="100"
             android:progressDrawable="@drawable/bg_hp_bar" />
@@ -85,25 +86,26 @@
             android:id="@+id/sheetResources"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:textColor="@color/parchment"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
 
         <TextView
             android:id="@+id/sheetXpLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:text="XP"
             android:textColor="@color/parchment"
-            android:textSize="12sp" />
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
         <ProgressBar
             android:id="@+id/sheetXpBar"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
             android:layout_height="12dp"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="3dp"
             android:max="100"
             android:progress="0"
             android:progressDrawable="@drawable/bg_xp_bar" />
@@ -112,18 +114,19 @@
             android:id="@+id/sheetClassTip"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:textColor="@color/gold"
-            android:textSize="12sp" />
+            android:textSize="11sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Attributes"
+            android:layout_marginTop="10dp"
+            android:text="ATTRIBUTES"
             android:textColor="@color/gold"
             android:textStyle="bold"
-            android:textSize="13sp" />
+            android:textSize="11sp"
+            android:letterSpacing="0.06" />
 
         <LinearLayout
             android:id="@+id/sheetStatsRow1"
@@ -131,9 +134,9 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="6dp">
-            <TextView android:id="@+id/sheetStatStr" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
-            <TextView android:id="@+id/sheetStatDex" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
-            <TextView android:id="@+id/sheetStatCon" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
+            <TextView android:id="@+id/sheetStatStr" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" android:layout_marginEnd="4dp" />
+            <TextView android:id="@+id/sheetStatDex" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" android:layout_marginEnd="4dp" />
+            <TextView android:id="@+id/sheetStatCon" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" />
         </LinearLayout>
         <LinearLayout
             android:id="@+id/sheetStatsRow2"
@@ -141,9 +144,9 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="4dp">
-            <TextView android:id="@+id/sheetStatInt" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
-            <TextView android:id="@+id/sheetStatWis" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
-            <TextView android:id="@+id/sheetStatCha" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/parchment" android:textSize="12sp" android:gravity="center" />
+            <TextView android:id="@+id/sheetStatInt" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" android:layout_marginEnd="4dp" />
+            <TextView android:id="@+id/sheetStatWis" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" android:layout_marginEnd="4dp" />
+            <TextView android:id="@+id/sheetStatCha" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="@drawable/bg_stat_chip" android:textColor="@color/parchment" android:textSize="11sp" android:gravity="center" />
         </LinearLayout>
 
         <TextView
@@ -151,7 +154,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:textColor="@color/parchment"
+            android:textColor="@color/parchment_dark"
             android:textSize="11sp"
             android:lineSpacingExtra="2dp" />
 
@@ -159,7 +162,7 @@
             android:id="@+id/sheetEquipped"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:textColor="@color/parchment"
             android:textSize="12sp" />
 
@@ -167,7 +170,7 @@
             android:id="@+id/sheetPointsHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:textColor="@color/gold"
             android:textStyle="bold"
             android:textSize="12sp"
@@ -187,7 +190,7 @@
             style="@style/Widget.DnD.ActionButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:minHeight="48dp"
             android:text="Assign attribute points"
             android:visibility="gone" />

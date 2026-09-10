@@ -7,7 +7,7 @@
         </shape>
     </item>
     <item
-        android:drawable="@drawable/bg_battle_weir"
+        android:drawable="@drawable/bg_battle_boss"
         android:left="3dp"
         android:top="3dp"
         android:right="3dp"
@@ -25,7 +25,7 @@
     </item>
     <item>
         <shape android:shape="rectangle">
-            <stroke android:width="2.5dp" android:color="#8060A0C0" />
+            <stroke android:width="2.5dp" android:color="#80E05040" />
             <corners android:radius="14dp" />
             <solid android:color="@android:color/transparent" />
         </shape>
