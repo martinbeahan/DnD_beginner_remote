@@ -22,7 +22,7 @@
         android:textColor="@color/parchment_dark"
         android:textSize="11sp"
         android:paddingBottom="8dp"
-        android:text="Equip class-tagged gear only if it matches your class. Upgrade spends gold." />
+        android:text="Equip class-tagged gear only if it matches your class. Upgrade spends gold. Sell returns gold (confirm)." />
 
     <ScrollView
         android:layout_width="match_parent"

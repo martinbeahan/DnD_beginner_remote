@@ -188,6 +188,8 @@ class MainActivity : AppCompatActivity() {
     external fun doUnequipItem(playerName: String, slot: Int): Boolean
     external fun doUpgradeInventoryItem(playerName: String, invIndex: Int): Boolean
     external fun doUpgradeEquippedItem(playerName: String, slot: Int): Boolean
+    external fun doSellInventoryItem(playerName: String, invIndex: Int): Boolean
+    external fun doSellEquippedItem(playerName: String, slot: Int): Boolean
     external fun isInCombat(): Boolean
     external fun isRoomCleared(): Boolean
     external fun hasSearchedRoom(): Boolean
@@ -2052,6 +2054,15 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Close", null)
             .create()
 
+        fun confirmSell(itemLabel: String, price: Int, onYes: () -> Unit) {
+            AlertDialog.Builder(this)
+                .setTitle("Sell item")
+                .setMessage("Sell $itemLabel for ${price}g?")
+                .setPositiveButton("Sell") { _, _ -> onYes() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
         fun refresh() {
             list.removeAllViews()
             val gold = try {
@@ -2071,7 +2082,7 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             for (entry in entries) {
-                // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost
+                // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost|sellPrice
                 val idxPart = entry.substringBefore(':')
                 val rest = entry.substringAfter(':', "")
                 val parts = rest.split('|')
@@ -2084,20 +2095,24 @@ class MainActivity : AppCompatActivity() {
                 val slot = parts[5]
                 val upgLvl = parts[6]
                 val upgCost = parts[7].toIntOrNull() ?: 0
+                val sellPrice = parts.getOrNull(8)?.toIntOrNull() ?: 1
                 val index = idxPart.toIntOrNull() ?: continue
                 val row = layoutInflater.inflate(R.layout.item_inventory_row, list, false)
                 val nameTv = row.findViewById<TextView>(R.id.invItemName)
                 val metaTv = row.findViewById<TextView>(R.id.invItemMeta)
                 val equipBtn = row.findViewById<Button>(R.id.invEquipBtn)
                 val upgBtn = row.findViewById<Button>(R.id.invUpgradeBtn)
-                nameTv.text = "$name (+$bonus)"
+                val sellBtn = row.findViewById<Button>(R.id.invSellBtn)
+                val itemLabel = "$name (+$bonus)"
+                nameTv.text = itemLabel
                 nameTv.setTextColor(rarityColor(rarity))
                 val slotLabel = when (slot) {
                     "weapon" -> "Equipped · Weapon"
                     "armor" -> "Equipped · Armor"
                     else -> "Bag"
                 }
-                metaTv.text = "$rarity · $cls · $type · $slotLabel · upg $upgLvl"
+                metaTv.text = "$rarity · $cls · $type · $slotLabel · upg $upgLvl · sell ${sellPrice}g"
+                sellBtn.text = "Sell (${sellPrice}g)"
                 if (slot == "weapon" || slot == "armor") {
                     equipBtn.text = "Unequip"
                     equipBtn.setOnClickListener {
@@ -2123,6 +2138,19 @@ class MainActivity : AppCompatActivity() {
                             refresh()
                         }
                     }
+                    sellBtn.setOnClickListener {
+                        val s = if (slot == "weapon") 0 else 1
+                        confirmSell(itemLabel, sellPrice) {
+                            val ok = try { doSellEquippedItem(forName, s) } catch (_: Exception) { false }
+                            val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                            if (ok) {
+                                syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                            } else {
+                                Toast.makeText(this, ev.ifBlank { "Could not sell." }, Toast.LENGTH_SHORT).show()
+                                refresh()
+                            }
+                        }
+                    }
                 } else {
                     equipBtn.text = "Equip"
                     equipBtn.setOnClickListener {
@@ -2144,6 +2172,18 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             Toast.makeText(this, ev.ifBlank { "Not enough gold!" }, Toast.LENGTH_SHORT).show()
                             refresh()
+                        }
+                    }
+                    sellBtn.setOnClickListener {
+                        confirmSell(itemLabel, sellPrice) {
+                            val ok = try { doSellInventoryItem(forName, index) } catch (_: Exception) { false }
+                            val ev = try { getLastEvent() } catch (_: Exception) { "" }
+                            if (ok) {
+                                syncAndSave(); appendCombatFeed(ev); refresh(); updateUi()
+                            } else {
+                                Toast.makeText(this, ev.ifBlank { "Could not sell." }, Toast.LENGTH_SHORT).show()
+                                refresh()
+                            }
                         }
                     }
                 }

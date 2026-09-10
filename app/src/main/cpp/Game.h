@@ -69,6 +69,8 @@ public:
     bool unequipSlot(const std::string& playerName, int slot); // 0=weapon, 1=armor
     bool upgradeInventoryItem(const std::string& playerName, int invIndex);
     bool upgradeEquippedItem(const std::string& playerName, int slot); // 0=weapon, 1=armor
+    bool sellInventoryItem(const std::string& playerName, int invIndex);
+    bool sellEquippedItem(const std::string& playerName, int slot); // 0=weapon, 1=armor; unequips then sells
 
     // Turn Management
     void processTurn();
