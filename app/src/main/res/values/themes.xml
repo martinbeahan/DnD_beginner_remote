@@ -47,8 +47,9 @@
         <item name="backgroundTint">@null</item>
     </style>
 
-    <!-- Parent required: dotted Text.DnD.* styles imply style/Text.DnD for AAPT. -->
-    <style name="Text.DnD" parent="TextAppearance.AppCompat">
+    <!-- Dotted style names require the full parent chain for AAPT (Text → Text.DnD → …). -->
+    <style name="Text" parent="TextAppearance.AppCompat" />
+    <style name="Text.DnD" parent="Text">
         <item name="android:textColor">@color/parchment</item>
     </style>
 
