@@ -121,13 +121,27 @@ public:
     int getQuestBeat() const { return questBeat_; }
     bool isQuestLanternRecovered() const { return questLanternRecovered_; }
     bool isQuestComplete() const { return questComplete_; }
-    /** Solo scripted Act 1 (1–6) or Act 2 (8–13); false for crawl / Host-as-DM / online. */
+    /** Solo scripted Act 1–3; false for crawl / raid / Host-as-DM / online. */
     bool isSoloQuestScripted() const {
         return isScriptedSoloBeat(questBeat_);
     }
     bool isSoloCrawl() const {
         return soloPlayMode_ == static_cast<int>(SoloPlayMode::CRAWL);
     }
+    bool isBossRaid() const {
+        return soloPlayMode_ == static_cast<int>(SoloPlayMode::RAID);
+    }
+    /** Acts 1–3 finished — gates Legendary loot, endgame bosses, Boss Raid meta. */
+    bool isStoryFullyComplete() const { return questAct3Complete_; }
+    bool isQuestAct2Complete() const { return questAct2Complete_; }
+    bool isQuestAct3Complete() const { return questAct3Complete_; }
+    /** Pending raid-key drop for Kotlin SharedPreferences (consume after read). */
+    bool consumePendingRaidKeyDrop() {
+        bool v = pendingRaidKeyDrop_;
+        pendingRaidKeyDrop_ = false;
+        return v;
+    }
+    bool peekPendingRaidKeyDrop() const { return pendingRaidKeyDrop_; }
 
     const std::vector<std::unique_ptr<Character>>& getPlayers() const { return players_; }
     const std::vector<std::unique_ptr<Character>>& getEnemies() const { return enemies_; }
@@ -171,6 +185,10 @@ private:
     bool bossSeenGk_ = false;
     bool bossSeenSk_ = false;
     bool bossSeenDrake_ = false;
+    bool bossSeenHollow_ = false;
+    bool bossSeenHydra_ = false;
+    bool bossSeenNightfang_ = false;
+    bool pendingRaidKeyDrop_ = false;
 
     int turnCounter_;
     int roomCount_;
@@ -186,6 +204,8 @@ private:
     bool questCryptKeyFound_ = false;
     bool questAct2Complete_ = false;   // Act 2 (Millhollow's Debt) finished
     bool questAct2LedgerFound_ = false;
+    bool questAct3Complete_ = false;   // Act 3 (Emberdeep Breach) finished — endgame gate
+    bool questAct3SealFound_ = false;
     int soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
     int difficulty_ = static_cast<int>(Difficulty::EASY);
     std::string dmName_;
@@ -224,7 +244,12 @@ private:
     void grantAshenLantern(Character* actor);
     void maybeFinishQuestOnResolutionEnter();
     void maybeFinishAct2OnSettledEnter();
+    void maybeFinishAct3OnSealedEnter();
     bool trySoloQuestSearch(Character* hero);
+    bool endgameContentAllowed() const;
+    void maybeGrantRaidKeyFromBoss(const std::string& foeName);
+    void applyLegendaryOnHit(Character* actor, int damageDealt);
+    void tryFightShield(Character* defender, int& incomingDamage);
     void revivePartyForDifficulty();
     void rollbackOneRoomOrBeat();
     void applyStarterPaddingForStory();

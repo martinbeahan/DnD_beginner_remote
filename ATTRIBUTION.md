@@ -115,3 +115,8 @@ Sprites reuse existing LuizMelo CC0 frames already shipped in the app (no new do
 | Skeleton King | `sprite_skeleton.png` / `_atk` |
 | Ashen Drake | `sprite_ogre.png` / `_atk` (large creature stand-in) |
 
+
+
+## Endgame / Act 3 / Boss Raids (v2.6)
+
+No new third-party art or audio. Act 3 / endgame / raid encounters reuse existing CC0 battle stages and monster sprites listed above (boss stage, cave, dungeon). Original names and flavor text only — not from any WotC module.

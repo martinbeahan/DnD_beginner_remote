@@ -33,6 +33,10 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     bossSeenGk_ = false;
     bossSeenSk_ = false;
     bossSeenDrake_ = false;
+    bossSeenHollow_ = false;
+    bossSeenHydra_ = false;
+    bossSeenNightfang_ = false;
+    pendingRaidKeyDrop_ = false;
     while(!visualEvents_.empty()) visualEvents_.pop();
 
     gameOver_ = false;
@@ -44,9 +48,12 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     dmName_.clear();
     // Local / solo table is always the turn authority (clients opt out via prepareClientJoin).
     isHost_ = true;
-    soloPlayMode_ = (soloPlayMode == static_cast<int>(SoloPlayMode::CRAWL))
-        ? static_cast<int>(SoloPlayMode::CRAWL)
-        : static_cast<int>(SoloPlayMode::STORY);
+    if (soloPlayMode == static_cast<int>(SoloPlayMode::CRAWL))
+        soloPlayMode_ = static_cast<int>(SoloPlayMode::CRAWL);
+    else if (soloPlayMode == static_cast<int>(SoloPlayMode::RAID))
+        soloPlayMode_ = static_cast<int>(SoloPlayMode::RAID);
+    else
+        soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
     difficulty_ = difficulty;
     if (difficulty_ < 0 || difficulty_ > 3) difficulty_ = static_cast<int>(Difficulty::EASY);
 
@@ -55,6 +62,8 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     questCryptKeyFound_ = false;
     questAct2Complete_ = false;
     questAct2LedgerFound_ = false;
+    questAct3Complete_ = false;
+    questAct3SealFound_ = false;
 
     players_.push_back(std::make_unique<Character>(playerName, selectedClass, "local-player"));
     players_.back()->aiControlled = false;
@@ -68,8 +77,36 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
         }
     }
 
+    if (soloPlayMode_ == static_cast<int>(SoloPlayMode::RAID)) {
+        // Boss Raid: endgame-only focused boss fight(s). Caller must gate story-complete + spend a key.
+        questBeat_ = static_cast<int>(SoloQuestBeat::NONE);
+        questComplete_ = true;
+        questAct2Complete_ = true;
+        questAct3Complete_ = true; // endgame loot/gates active for this run
+        roomCount_ = 20;
+        generateRoomDescription();
+        // Force an endgame boss immediately
+        enemies_.clear();
+        isMerchantRoom_ = false;
+        roomSearchUsed_ = false;
+        {
+            int pick = getRandomInt(0, 2);
+            if (pick == 0) spawnNamedBoss("Hollow Crown", 4);
+            else if (pick == 1) spawnNamedBoss("Ember Hydra", 5);
+            else spawnNamedBoss("Nightfang Matriarch", 4);
+            roomDescription_ = "Raid arena — a sealed endgame vault. One Raid Key spent. Defeat the raid boss for rich spoils.";
+            lastEvent_ = "BOSS RAID! Stand ready!";
+            dmSay("Boss Raid begins. Spend was paid in keys — earn gold, XP, and a chance at Legendary gear and another key.");
+        }
+        if (!enemies_.empty()) rollInitiative();
+        else { turnOrder_.clear(); currentTurnIndex_ = 0; }
+        addChatMessage("System", "Boss Raid begins (difficulty: " + std::string(difficultyName(difficulty_)) + ").");
+        return;
+    }
+
     if (soloPlayMode_ == static_cast<int>(SoloPlayMode::CRAWL)) {
         // Dungeon Crawl: skip quest script — classic procedural rooms from the start.
+        // Early crawl keeps GK/SK/Drake; true endgame bosses require story complete (Continue from post-Act3).
         questBeat_ = static_cast<int>(SoloQuestBeat::NONE);
         generateRoomDescription();
         spawnRoomContent();
@@ -82,12 +119,12 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
         lastEvent_ = "Dungeon Crawl — Room 1. No story script; clear chambers and press Onward.";
         addChatMessage("System", "Dungeon Crawl begins (difficulty: " + std::string(difficultyName(difficulty_)) + ").");
         dmSay("Welcome, adventurers. I am your Dungeon Master.");
-        dmSay("Crawl mode: procedural rooms only — no Ashen Lantern or Millhollow's Debt script.");
+        dmSay("Crawl mode: procedural rooms only — finish the story (Acts 1–3) to unlock endgame bosses and Legendary loot.");
         dmSay("Use Attack, Special, Potion, Search once per clear chamber, Short Rest, and Onward.");
         return;
     }
 
-    // Story Solo: Act 1 Ashen Lantern, then Act 2 Millhollow's Debt.
+    // Story Solo: Act 1 → Act 2 → Act 3, then endgame procedural.
     questBeat_ = static_cast<int>(SoloQuestBeat::MILLHOLLOW);
     applyStarterPaddingForStory();
     applySoloQuestRoom();
@@ -385,6 +422,9 @@ void Game::resetSoloQuestState() {
     questCryptKeyFound_ = false;
     questAct2Complete_ = false;
     questAct2LedgerFound_ = false;
+    questAct3Complete_ = false;
+    questAct3SealFound_ = false;
+    pendingRaidKeyDrop_ = false;
     soloPlayMode_ = static_cast<int>(SoloPlayMode::STORY);
 }
 
@@ -410,6 +450,7 @@ void Game::applySoloQuestRoom() {
     spawnSoloQuestEnemies();
     maybeFinishQuestOnResolutionEnter();
     maybeFinishAct2OnSettledEnter();
+    maybeFinishAct3OnSealedEnter();
 
     if (enemies_.empty()) {
         // Soft-open story beats: Search / Rest / Onward available immediately.
@@ -525,6 +566,30 @@ void Game::spawnSoloQuestEnemies() {
             break;
         case SoloQuestBeat::ACT2_SETTLED:
             break;
+        case SoloQuestBeat::ACT3_RUMOR:
+            makeFoe("Ash Scavenger", CharacterClass::ROGUE, 2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            break;
+        case SoloQuestBeat::ACT3_WELL:
+            makeFoe("Giant Rat", CharacterClass::ROGUE, 0, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            makeFoe("Root Goblin", CharacterClass::ROGUE, 2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            break;
+        case SoloQuestBeat::ACT3_ROOTS:
+            makeFoe("Skeleton", CharacterClass::FIGHTER, 4, 0, /*resourceCap=*/0, /*attackStatDelta=*/-1);
+            makeFoe("Skeleton", CharacterClass::FIGHTER, 2, 0, /*resourceCap=*/0, /*attackStatDelta=*/-2);
+            break;
+        case SoloQuestBeat::ACT3_RELIC:
+            // Soft open: Search for Ember Seal
+            break;
+        case SoloQuestBeat::ACT3_WARDEN:
+            makeFoe("Breach Warden", CharacterClass::FIGHTER, 22, 2, /*resourceCap=*/2, /*attackStatDelta=*/0);
+            {
+                Character* ally = findNpcCompanion();
+                std::string who = ally ? ally->name : "your companion";
+                dmSay("The Breach Warden bars the ember wound. Keep potions ready — " + who + " will help.");
+            }
+            break;
+        case SoloQuestBeat::ACT3_SEALED:
+            break;
         default:
             break;
     }
@@ -575,13 +640,39 @@ void Game::maybeFinishAct2OnSettledEnter() {
     if (!questAct2Complete_) {
         questAct2Complete_ = true;
         dmSay("The coerced ledger burns. The false mill seal cracks. Collectors melt into the mist.");
-        dmSay("Millhollow's Debt is settled. Rest, return to the menu, or press Onward into uncharted rooms.");
+        dmSay("Millhollow's Debt is settled. Rest if you need — then Onward for Act 3: Emberdeep Breach.");
         addJournalEntry("Millhollow's Debt complete — ledger destroyed; false seal broken.");
-        addChatMessage("Quest", "Act 2 done — Millhollow's Debt.");
+        addChatMessage("Quest", "Act 2 done — Millhollow's Debt. Act 3 awaits.");
         if (players_.empty() == false && players_[0]) {
             players_[0]->gold += 40;
         }
     }
+}
+
+void Game::maybeFinishAct3OnSealedEnter() {
+    if (static_cast<SoloQuestBeat>(questBeat_) != SoloQuestBeat::ACT3_SEALED) return;
+    if (!questAct3SealFound_) {
+        questAct3SealFound_ = true;
+        addJournalEntry("Safety: Ember Seal counted as recovered at Breach Sealed.");
+    }
+    if (!questAct3Complete_) {
+        questAct3Complete_ = true;
+        questAct2Complete_ = true;
+        questComplete_ = true;
+        dmSay("The Ember Seal locks. Ember-light dies. Cool air returns up the well to Millhollow.");
+        dmSay("Story complete (Acts 1–3). Endgame crawl bosses, Legendary gear, and Boss Raids unlock.");
+        addJournalEntry("Emberdeep Breach complete — story finished; endgame unlocked.");
+        addChatMessage("Quest", "Act 3 done — Story complete! Endgame unlocked.");
+        if (!players_.empty() && players_[0]) {
+            players_[0]->gold += 60;
+        }
+    }
+}
+
+bool Game::endgameContentAllowed() const {
+    // Raid runs always treat endgame as open; otherwise require Act 3 complete.
+    if (isBossRaid()) return true;
+    return questAct3Complete_;
 }
 
 bool Game::trySoloQuestSearch(Character* hero) {
@@ -638,8 +729,32 @@ bool Game::trySoloQuestSearch(Character* hero) {
     }
     if (beat == SoloQuestBeat::ACT2_SETTLED) {
         lastEvent_ = hero->name + " finds only ash in the clay bowl — the debt is already settled.";
-        dmSay("Nothing more to take. Millhollow owes you quiet thanks.");
+        dmSay("Nothing more to take. Onward leads to the old well — Emberdeep Breach.");
         addJournalEntry("Searched after Debt Settled — Act 2 already won.");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::ACT3_RUMOR) {
+        hero->gold += 12;
+        lastEvent_ = hero->name + " hears: \"The Ember Seal sleeps in a niche past the root maze — only it can close the wound.\"";
+        dmSay("Clue: recover the Ember Seal, then face whatever guards the breach.");
+        addJournalEntry("Clue: Ember Seal lies past the Root Labyrinth.");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::ACT3_RELIC) {
+        questAct3SealFound_ = true;
+        hero->gold += 20;
+        lastEvent_ = hero->name + " lifts the Ember Seal — iron disc, still warm, etched with ash-runes.";
+        dmSay("You have the Ember Seal. Onward to the Breach Threshold — the Warden waits.");
+        addJournalEntry("Recovered the Ember Seal (questAct3SealFound).");
+        addChatMessage("Search", lastEvent_);
+        return true;
+    }
+    if (beat == SoloQuestBeat::ACT3_SEALED) {
+        lastEvent_ = hero->name + " finds cooling ash where the breach once roared — the seal holds.";
+        dmSay("Nothing more to take. Story is complete — Onward opens endgame rooms.");
+        addJournalEntry("Searched after Breach Sealed — Act 3 already won.");
         addChatMessage("Search", lastEvent_);
         return true;
     }
@@ -651,11 +766,12 @@ void Game::generateRoomDescription() {
         // Description already set by applySoloQuestRoom; keep procedural helper for post-quest / DM.
         return;
     }
-    if (questAct2Complete_ || (questComplete_ && questBeat_ == static_cast<int>(SoloQuestBeat::POST_QUEST))) {
+    if (questAct3Complete_ || questAct2Complete_ || (questComplete_ && questBeat_ == static_cast<int>(SoloQuestBeat::POST_QUEST))) {
         std::vector<std::string> adjectives = {"dark", "damp", "ancient", "dusty", "eerie", "forgotten", "cursed"};
         std::vector<std::string> rooms = {"chamber", "hallway", "library", "crypt", "vault", "shrine", "laboratory"};
         std::stringstream ss;
-        const char* tag = questAct2Complete_ ? "[Story complete] " : "[Main quest done] ";
+        const char* tag = questAct3Complete_ ? "[Endgame] "
+            : (questAct2Complete_ ? "[After Act 2] " : "[Main quest done] ");
         ss << tag << "You press into a " << adjectives[static_cast<size_t>(getRandomInt(0, static_cast<int>(adjectives.size()) - 1))]
            << " " << rooms[static_cast<size_t>(getRandomInt(0, static_cast<int>(rooms.size()) - 1))] << ". ";
         roomDescription_ = ss.str();
@@ -709,6 +825,8 @@ void Game::spawnRoomContent() {
 }
 
 void Game::rollInitiative() {
+    for (auto& p : players_) { if (p) p->fightShieldUsed = false; }
+
     turnOrder_.clear();
     if (isMerchantRoom_) return;
 
@@ -800,16 +918,21 @@ void Game::restockShop() {
     shopInventory_.push_back(Item::make("Healing Draught", ItemType::POTION, 8 + depthBonus, ItemRarity::COMMON, -1));
     shopInventory_.push_back(Item::make("Greater Potion", ItemType::POTION, 14 + depthBonus, ItemRarity::UNCOMMON, -1));
 
-    // Party-relevant class stock first.
+    // Party stock: commons/uncommons dominate; Rare/Epic gated deeper (#46). No Legendary in shop.
     if (preferA >= 0) {
         shopInventory_.push_back(classWeapon(preferA, ItemRarity::UNCOMMON, depthBonus + 1));
-        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferA, ItemRarity::RARE, depthBonus + 3));
+        if (roomCount_ >= 10)
+            shopInventory_.push_back(classArmor(preferA, ItemRarity::RARE, depthBonus + 2));
+        else if (roomCount_ >= 5)
+            shopInventory_.push_back(classArmor(preferA, ItemRarity::UNCOMMON, depthBonus + 1));
     }
     if (preferB >= 0 && preferB != preferA) {
         shopInventory_.push_back(classWeapon(preferB, ItemRarity::UNCOMMON, depthBonus + 1));
-        if (roomCount_ >= 6) shopInventory_.push_back(classArmor(preferB, ItemRarity::RARE, depthBonus + 2));
+        if (roomCount_ >= 12)
+            shopInventory_.push_back(classArmor(preferB, ItemRarity::RARE, depthBonus + 2));
+        else if (roomCount_ >= 6)
+            shopInventory_.push_back(classArmor(preferB, ItemRarity::UNCOMMON, depthBonus + 1));
     }
-    // One off-class piece OK (for transfer / future companion swap).
     int off = -1;
     for (int c = 0; c < 4; ++c) {
         if (!isPartyClass(c)) { off = c; break; }
@@ -817,10 +940,10 @@ void Game::restockShop() {
     if (off >= 0) {
         shopInventory_.push_back(classWeapon(off, ItemRarity::UNCOMMON, depthBonus + 1));
     }
-    if (roomCount_ >= 10 && preferA >= 0) {
+    if (roomCount_ >= 16 && preferA >= 0) {
         shopInventory_.push_back(classWeapon(preferA, ItemRarity::EPIC, depthBonus + 3));
     }
-    if (roomCount_ >= 10 && preferB >= 0) {
+    if (roomCount_ >= 20 && preferB >= 0) {
         shopInventory_.push_back(classArmor(preferB, ItemRarity::EPIC, depthBonus + 4));
     }
 }
@@ -874,11 +997,14 @@ std::string Game::getInventoryManifest(const std::string& playerName) const {
     auto emit = [&](const std::shared_ptr<Item>& it, const char* slot, int index) {
         if (!it) return;
         // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost|sellPrice
+        // idx:name|bonus|type|rarity|class|slot|upgradeLevel|upgradeCost|sellPrice|legText
+        std::string leg = it->legendaryBonusText();
+        for (char& ch : leg) { if (ch == ';' || ch == '|' || ch == ':') ch = ','; }
         ss << index << ":" << it->name << "|" << it->bonus << "|"
            << (it->type == ItemType::WEAPON ? "Weapon" : (it->type == ItemType::ARMOR ? "Armor" : "Potion"))
            << "|" << it->rarityLabel() << "|" << it->classLabel() << "|" << slot
            << "|" << it->upgradeLevel << "|" << it->upgradeCost()
-           << "|" << it->sellPrice() << ";";
+           << "|" << it->sellPrice() << "|" << leg << ";";
     };
     // Equipped first with negative-ish slots encoded as weapon/armor indices in slot field
     emit(hero->equippedWeapon, "weapon", -1);
@@ -910,6 +1036,7 @@ bool Game::equipInventoryItem(const std::string& playerName, int invIndex) {
     if (item->type == ItemType::WEAPON) {
         if (hero->equippedWeapon) hero->addToInventory(hero->equippedWeapon);
         hero->equippedWeapon = item;
+        hero->calculateAC(); // Legendary DEX on weapons can affect AC
     } else {
         if (hero->equippedArmor) hero->addToInventory(hero->equippedArmor);
         hero->equippedArmor = item;
@@ -928,6 +1055,7 @@ bool Game::unequipSlot(const std::string& playerName, int slot) {
         hero->addToInventory(hero->equippedWeapon);
         lastEvent_ = hero->name + " unequips " + hero->equippedWeapon->name + ".";
         hero->equippedWeapon = nullptr;
+        hero->calculateAC();
         return true;
     }
     if (slot == 1) {
@@ -1136,6 +1264,11 @@ void Game::markBossSeen(const std::string& name) {
     int tier = LootSystem::bossTier(name);
     if (tier == 1) bossSeenGk_ = true;
     else if (tier == 2) bossSeenSk_ = true;
+    else if (name.find("Ashen Drake") != std::string::npos || name.find("Dragon") != std::string::npos)
+        bossSeenDrake_ = true;
+    else if (name.find("Hollow Crown") != std::string::npos) bossSeenHollow_ = true;
+    else if (name.find("Ember Hydra") != std::string::npos) bossSeenHydra_ = true;
+    else if (name.find("Nightfang Matriarch") != std::string::npos) bossSeenNightfang_ = true;
     else if (tier >= 3) bossSeenDrake_ = true;
 }
 
@@ -1144,11 +1277,20 @@ void Game::spawnNamedBoss(const std::string& name, int tier) {
     CharacterClass cl = CharacterClass::FIGHTER;
     if (tier == 1) cl = CharacterClass::ROGUE;
     else if (tier == 3) cl = CharacterClass::WIZARD;
+    else if (tier >= 4) {
+        if (name.find("Ember Hydra") != std::string::npos) cl = CharacterClass::WIZARD;
+        else if (name.find("Nightfang") != std::string::npos) cl = CharacterClass::ROGUE;
+        else cl = CharacterClass::FIGHTER;
+    }
     auto foe = std::make_unique<Character>(name, cl, name + "-" + std::to_string(getRandomInt(0, 1000000)));
-    // Scale carefully: Easy/Medium stay fair; Harder difficulties punch up.
     int hpBonus = 10 + tier * 8 + roomCount_;
-    int acBonus = tier;
+    int acBonus = std::min(6, tier);
     int atkDelta = (tier >= 3) ? 0 : -1;
+    if (tier >= 4) {
+        hpBonus += 12 + (tier - 3) * 10;
+        acBonus += 1;
+        atkDelta += 1;
+    }
     if (difficulty_ <= static_cast<int>(Difficulty::EASY)) {
         hpBonus = std::max(8, hpBonus - 8);
         acBonus = std::max(0, acBonus - 1);
@@ -1162,8 +1304,7 @@ void Game::spawnNamedBoss(const std::string& name, int tier) {
     foe->maxHp += hpBonus;
     foe->currentHp = foe->maxHp;
     foe->armorClass += acBonus;
-    foe->resources = std::min(foe->maxResources, tier);
-    // Nudge primary attack stat
+    foe->resources = std::min(foe->maxResources, std::max(1, tier));
     if (cl == CharacterClass::ROGUE) foe->attributes.dexterity = std::max(8, foe->attributes.dexterity + atkDelta);
     else if (cl == CharacterClass::WIZARD) foe->attributes.intelligence = std::max(8, foe->attributes.intelligence + atkDelta);
     else foe->attributes.strength = std::max(8, foe->attributes.strength + atkDelta);
@@ -1182,13 +1323,15 @@ void Game::maybeSpawnBossEncounter() {
     if (isSoloQuestScripted()) return;
 
     const bool easy = difficulty_ <= static_cast<int>(Difficulty::EASY);
-    // Tuned gates (was Easy GK@8/22%, SK@12/18%, Drake@18/10% — too rare by room 20).
+    const bool endgame = endgameContentAllowed();
     const int gkNeed = easy ? 5 : 4;
     const int skNeed = easy ? 9 : 8;
     const int dragonNeed = easy ? 14 : 12;
+    const int endNeed = easy ? 22 : 18;
     const int gkChance = easy ? 32 : 34;
     const int skChance = easy ? 26 : 28;
     const int dragonChance = easy ? 14 : 16;
+    const int endChance = easy ? 18 : 22;
 
     auto spawnGkCourt = [&]() {
         spawnNamedBoss("Goblin King", 1);
@@ -1204,7 +1347,6 @@ void Game::maybeSpawnBossEncounter() {
         addJournalEntry("Boss: Goblin King.");
     };
 
-    // Guaranteed Goblin King by room 10 if none seen yet (first eligible crawl/post-quest combat room).
     if (roomCount_ >= 10 && !bossSeenGk_) {
         spawnGkCourt();
         return;
@@ -1213,7 +1355,32 @@ void Game::maybeSpawnBossEncounter() {
     if (roomCount_ < gkNeed) return;
 
     int roll = getRandomInt(1, 100);
-    // Ashen Drake (Dragon) — late gate
+
+    // Endgame-only originals — require story Acts 1–3 complete (or Boss Raid).
+    if (endgame && roomCount_ >= endNeed && roll <= endChance) {
+        int pick = getRandomInt(0, 2);
+        auto place = [&](const std::string& nm, int tier, const std::string& desc) {
+            spawnNamedBoss(nm, tier);
+            roomDescription_ = desc;
+            lastEvent_ = "BOSS! " + nm + " — stand ready!";
+            dmSay("Endgame boss: " + nm + " (original). Legendary spoils possible.");
+            addJournalEntry("Boss: " + nm + ".");
+        };
+        if (pick == 0) {
+            place("Hollow Crown", 4,
+                  "A throne of cracked millstone and bone. The Hollow Crown — an endgame tyrant of ash — rises without a face.");
+            return;
+        }
+        if (pick == 1) {
+            place("Ember Hydra", 5,
+                  "Multiple ember-lit heads weave between pillars. The Ember Hydra hisses steam and bone-fire.");
+            return;
+        }
+        place("Nightfang Matriarch", 4,
+              "Webs thick as rope choke the vault. The Nightfang Matriarch — a vast spider-queen — descends.");
+        return;
+    }
+
     if (roomCount_ >= dragonNeed && roll <= dragonChance) {
         spawnNamedBoss("Ashen Drake", 3);
         roomDescription_ = "The chamber opens into a scorched hollow. An Ashen Drake coils around a cracked pillar — heat warps the air.";
@@ -1222,7 +1389,6 @@ void Game::maybeSpawnBossEncounter() {
         addJournalEntry("Boss: Ashen Drake stirs in the deep.");
         return;
     }
-    // Skeleton King — mid-deep
     if (roomCount_ >= skNeed && roll <= skChance) {
         spawnNamedBoss("Skeleton King", 2);
         roomDescription_ = "Bone thrones and rusted crowns litter the floor. The Skeleton King rises, empty eyes fixed on you.";
@@ -1231,7 +1397,6 @@ void Game::maybeSpawnBossEncounter() {
         addJournalEntry("Boss: Skeleton King.");
         return;
     }
-    // Goblin King — earliest boss
     if (roomCount_ >= gkNeed && roll <= gkChance) {
         spawnGkCourt();
     }
@@ -1240,10 +1405,32 @@ void Game::maybeSpawnBossEncounter() {
 void Game::noteBossDefeat(const std::string& foeName) {
     int tier = LootSystem::bossTier(foeName);
     if (tier <= 0) return;
-    pendingBossXpBonus_ += 40 * tier + roomCount_ * 2;
-    pendingBossLootLuck_ += 15 + tier * 12;
-    pendingBossGoldBonus_ += 20 * tier + getRandomInt(5, 15);
+    // #46 base luck: 10+tier*8 — bosses better than trash, not BiS flood
+    int xp = 40 * tier + roomCount_ * 2;
+    int luck = 10 + tier * 8;
+    int gold = 20 * tier + getRandomInt(5, 15);
+    if (LootSystem::isEndgameBossName(foeName) || isBossRaid()) {
+        xp += 80;
+        luck += 18; // still modest; Legendary needs endgameUnlocked + rarityRoll
+        gold += 40;
+    }
+    pendingBossXpBonus_ += xp;
+    pendingBossLootLuck_ += luck;
+    pendingBossGoldBonus_ += gold;
     dmSay("Boss fallen: " + foeName + "! Greater rewards await.");
+    maybeGrantRaidKeyFromBoss(foeName);
+}
+
+void Game::maybeGrantRaidKeyFromBoss(const std::string& foeName) {
+    if (!endgameContentAllowed()) return;
+    int tier = LootSystem::bossTier(foeName);
+    if (tier < 3 && !LootSystem::isEndgameBossName(foeName) && !isBossRaid()) return;
+    int chance = isBossRaid() ? 55 : (LootSystem::isEndgameBossName(foeName) ? 40 : 22);
+    if (getRandomInt(1, 100) <= chance) {
+        pendingRaidKeyDrop_ = true;
+        dmSay("A Raid Key glints among the spoils — check the menu (max 2 held per calendar day).");
+        addJournalEntry("Raid Key recovered from " + foeName + ".");
+    }
 }
 
 void Game::advanceTurn() {
@@ -1414,14 +1601,16 @@ void Game::enterClearedRoom(Character* actor) {
     } else if (actor && !actor->isDead) {
         int preferA = -1, preferB = -1;
         partyPreferClasses(preferA, preferB);
-        auto loot = LootSystem::generateLoot(roomCount_, luck, preferA, preferB);
+        const bool eg = endgameContentAllowed();
+        auto loot = LootSystem::generateLoot(roomCount_, luck, preferA, preferB, eg);
         if (loot) {
             actor->addToInventory(loot);
             dmSay(actor->name + " finds " + loot->getDescription() + " [" + loot->rarityLabel() + "] — check Inventory.");
             addJournalEntry(actor->name + " found loot: " + loot->getDescription() + " (" + loot->rarityLabel() + ")");
         } else if (luck > 0) {
-            // Boss clears always drop something when luck was banked but roll missed — guarantee uncommon+.
-            auto pity = LootSystem::generateLoot(roomCount_, 80, preferA, preferB);
+            // #46 pity: guarantee a drop without luck=80 Epic flood.
+            auto pity = LootSystem::generateLoot(roomCount_, 30, preferA, preferB, eg);
+            if (!pity) pity = LootSystem::generateLoot(roomCount_, 60, preferA, preferB, eg);
             if (pity) {
                 actor->addToInventory(pity);
                 dmSay(actor->name + " claims a boss trophy: " + pity->getDescription() + " [" + pity->rarityLabel() + "].");
@@ -1618,6 +1807,35 @@ void Game::processTurn() {
 }
 
 
+void Game::applyLegendaryOnHit(Character* actor, int damageDealt) {
+    if (!actor || damageDealt <= 0 || !actor->equippedWeapon) return;
+    auto& w = actor->equippedWeapon;
+    if (!w->subEffectUnlocked()) return;
+    int heal = 0;
+    if (w->subEffect == static_cast<int>(LegendarySubEffect::LIFESTEAL)) {
+        heal = 1 + (w->upgradeLevel / 10);
+    } else if (w->subEffect == static_cast<int>(LegendarySubEffect::ON_HIT_HEAL)) {
+        heal = 2;
+    }
+    if (heal > 0) {
+        actor->heal(heal);
+        dmSay(actor->name + "'s Legendary weapon restores " + std::to_string(heal) + " HP.");
+    }
+}
+
+void Game::tryFightShield(Character* defender, int& incomingDamage) {
+    if (!defender || incomingDamage <= 0 || !defender->equippedArmor) return;
+    auto& a = defender->equippedArmor;
+    if (!a->subEffectUnlocked()) return;
+    if (a->subEffect != static_cast<int>(LegendarySubEffect::FIGHT_SHIELD)) return;
+    if (defender->fightShieldUsed) return;
+    defender->fightShieldUsed = true;
+    int absorb = 5 + (a->upgradeLevel / 5);
+    int blocked = std::min(incomingDamage, absorb);
+    incomingDamage -= blocked;
+    dmSay(defender->name + "'s Legendary armor projects a once-per-fight shield (" + std::to_string(blocked) + " absorbed).");
+}
+
 void Game::dmSay(const std::string& line) {
     addChatMessage("DM", line);
 }
@@ -1647,7 +1865,13 @@ bool Game::performWeaponAttack(Character* actor, Character& target, int atkVisIn
     if (hit) {
         int extraDice = sneakAttack ? actor->sneakAttackDice() : 0;
         int dmg = CombatSystem::calculateDamage(*actor, result.isCriticalHit, extraDice, 6);
+        if (!targetIsEnemy) {
+            tryFightShield(&target, dmg);
+        }
         target.takeDamage(dmg);
+        if (targetIsEnemy) {
+            applyLegendaryOnHit(actor, dmg);
+        }
         pushVisualEvent(targetIsEnemy ? VisualEventType::ENEMY_DAMAGE : VisualEventType::PLAYER_DAMAGE, targetIndex);
         ss << (result.isCriticalHit ? "CRITICAL HIT! " : "Hit! ") << "Damage " << dmg;
         if (sneakAttack) ss << " (includes Sneak Attack)";
@@ -1927,7 +2151,7 @@ void Game::playerAdvanceFromCleared() {
         return;
     }
 
-    // Solo story: Act 1 beats → Act 2 → procedural post-quest.
+    // Solo story: Act 1 → Act 2 → Act 3 → procedural endgame.
     if (isSoloQuestScripted()) {
         if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::CRYPT_DOORS && !questCryptKeyFound_) {
             dmSay("The doors yield grudgingly — you force them without the rune-key. Dust and bone-scent spill out.");
@@ -1936,6 +2160,10 @@ void Game::playerAdvanceFromCleared() {
         if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::ACT2_LOFT && !questAct2LedgerFound_) {
             dmSay("You leave without the ledger — the Collector will still have copies. Steel yourselves.");
             addJournalEntry("Left Ledger Loft without recovering the coerced ledger.");
+        }
+        if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::ACT3_RELIC && !questAct3SealFound_) {
+            dmSay("You leave without the Ember Seal — the breach will not close cleanly.");
+            addJournalEntry("Left Ember Seal Niche without the seal.");
         }
 
         if (questBeat_ >= static_cast<int>(SoloQuestBeat::MILLHOLLOW)
@@ -1974,7 +2202,34 @@ void Game::playerAdvanceFromCleared() {
             addJournalEntry("The party advanced to " + std::string(soloQuestBeatName(questBeat_)) + ".");
             return;
         }
+        if (questBeat_ == static_cast<int>(SoloQuestBeat::ACT2_SETTLED)) {
+            questAct2Complete_ = true;
+            questComplete_ = true;
+            questBeat_ = static_cast<int>(SoloQuestBeat::ACT3_RUMOR);
+            roomCount_++;
+            roomSearchUsed_ = false;
+            applySoloQuestRoom();
+            if (!enemies_.empty()) rollInitiative();
+            lastEvent_ = "Onward — Act 3: Emberdeep Breach begins.";
+            addChatMessage("Quest", lastEvent_);
+            addJournalEntry("Act 3 begins — Emberdeep Breach at the old well.");
+            return;
+        }
+        if (questBeat_ >= static_cast<int>(SoloQuestBeat::ACT3_RUMOR)
+            && questBeat_ < static_cast<int>(SoloQuestBeat::ACT3_SEALED)) {
+            questBeat_++;
+            roomCount_++;
+            roomSearchUsed_ = false;
+            applySoloQuestRoom();
+            if (!enemies_.empty()) rollInitiative();
+            lastEvent_ = std::string("Onward — ") + soloQuestBeatName(questBeat_) + ".";
+            addChatMessage("Quest", lastEvent_);
+            addJournalEntry("The party advanced to " + std::string(soloQuestBeatName(questBeat_)) + ".");
+            return;
+        }
+        // ACT3_SEALED → post-story endgame procedural
         questBeat_ = static_cast<int>(SoloQuestBeat::POST_QUEST);
+        questAct3Complete_ = true;
         questAct2Complete_ = true;
         questComplete_ = true;
         roomCount_++;
@@ -1994,11 +2249,26 @@ void Game::playerAdvanceFromCleared() {
             lastEvent_ = bossToast;
             addChatMessage("Quest", lastEvent_);
         } else {
-            lastEvent_ = "Story complete — deeper rooms await. Room " + std::to_string(roomCount_) + ".";
-            addChatMessage("Quest", "Acts complete — continuing into unscripted chambers.");
-            dmSay("Beyond Millhollow's green, the wilds open again. Both debts of light and grain are settled — adventure is not.");
+            lastEvent_ = "Story complete — endgame rooms await. Room " + std::to_string(roomCount_) + ".";
+            addChatMessage("Quest", "Acts 1–3 complete — endgame unlocked.");
+            dmSay("Millhollow sleeps. Endgame crawl bosses, Legendary gear, and Boss Raids await the brave.");
         }
-        addJournalEntry("Post-story exploration begins (Acts 1–2 done).");
+        addJournalEntry("Post-story endgame exploration begins (Acts 1–3 done).");
+        return;
+    }
+
+    // Legacy / mid-save: finished Act 2 into procedural before Act 3 shipped → start Act 3.
+    if (!isBossRaid() && !isSoloCrawl()
+        && questAct2Complete_ && !questAct3Complete_
+        && !isSoloQuestScripted()) {
+        questBeat_ = static_cast<int>(SoloQuestBeat::ACT3_RUMOR);
+        roomCount_++;
+        roomSearchUsed_ = false;
+        applySoloQuestRoom();
+        if (!enemies_.empty()) rollInitiative();
+        lastEvent_ = "Onward — Act 3: Emberdeep Breach begins (story continues).";
+        addChatMessage("Quest", lastEvent_);
+        addJournalEntry("Act 3 begins from post–Act 2 save.");
         return;
     }
 
@@ -2183,6 +2453,7 @@ void Game::enemyTurn() {
         if (hit) {
             int extra = sneak ? enemy->sneakAttackDice() : 0;
             int dmg = CombatSystem::calculateDamage(*enemy, result.isCriticalHit, extra, 6);
+            tryFightShield(&hero, dmg);
             bool wasDowned = hero.isDowned || hero.isStable;
             hero.takeDamage(dmg, wasDowned && result.isCriticalHit);
             pushVisualEvent(VisualEventType::PLAYER_DAMAGE, targetIdx);
@@ -2261,8 +2532,11 @@ std::string Game::getPartyStatus() const {
 
     const bool exploreBeat = isMerchantRoom_ || (enemies_.empty() && roomCount_ >= 1 && !dmOnlyTable_);
     ss << "Room " << roomCount_ << " | Turn: " << (current ? current->name : (exploreBeat ? "Safe" : "None")) << "\n";
-    if (isSoloCrawl()) ss << "Mode: Dungeon Crawl\n";
-    else if (questAct2Complete_) ss << "Story complete: Ashen Lantern + Millhollow's Debt\n";
+    if (isBossRaid()) ss << "Mode: Boss Raid\n";
+    else if (isSoloCrawl()) ss << "Mode: Dungeon Crawl\n";
+    else if (questAct3Complete_) ss << "Story complete: Acts 1–3 (endgame unlocked)\n";
+    else if (isAct3Beat(questBeat_)) ss << "Quest: Emberdeep Breach — " << soloQuestBeatName(questBeat_) << "\n";
+    else if (questAct2Complete_ && !isSoloQuestScripted()) ss << "Acts 1–2 done — Act 3 pending or onward\n";
     else if (isAct2Beat(questBeat_)) ss << "Quest: Millhollow's Debt — " << soloQuestBeatName(questBeat_) << "\n";
     else if (questComplete_ && !isSoloQuestScripted()) ss << "Quest complete: Ashen Lantern recovered\n";
     else if (isAct1Beat(questBeat_)) ss << "Quest: Ashen Lantern — " << soloQuestBeatName(questBeat_) << "\n";
@@ -2323,7 +2597,9 @@ std::string Game::serialize() {
        << "," << (questCryptKeyFound_ ? 1 : 0)
        << "," << (questAct2Complete_ ? 1 : 0) << "," << (questAct2LedgerFound_ ? 1 : 0)
        << "," << soloPlayMode_ << "," << difficulty_
-       << "," << (bossSeenGk_ ? 1 : 0) << "," << (bossSeenSk_ ? 1 : 0) << "," << (bossSeenDrake_ ? 1 : 0) << "|";
+       << "," << (bossSeenGk_ ? 1 : 0) << "," << (bossSeenSk_ ? 1 : 0) << "," << (bossSeenDrake_ ? 1 : 0)
+       << "," << (questAct3Complete_ ? 1 : 0) << "," << (questAct3SealFound_ ? 1 : 0)
+       << "," << (bossSeenHollow_ ? 1 : 0) << "," << (bossSeenHydra_ ? 1 : 0) << "," << (bossSeenNightfang_ ? 1 : 0) << "|";
     // Section 1: Descriptions
     ss << roomDescription_ << "~" << lastEvent_ << "|";
     // Section 2: Players
@@ -2372,6 +2648,12 @@ void Game::deserialize(const std::string& data) {
     bossSeenGk_ = false;
     bossSeenSk_ = false;
     bossSeenDrake_ = false;
+    bossSeenHollow_ = false;
+    bossSeenHydra_ = false;
+    bossSeenNightfang_ = false;
+    pendingRaidKeyDrop_ = false;
+    questAct3Complete_ = false;
+    questAct3SealFound_ = false;
     shopInventory_.clear();
 
     std::stringstream ss(data);
@@ -2416,6 +2698,17 @@ void Game::deserialize(const std::string& data) {
             else bossSeenSk_ = false;
             if (std::getline(ss_sub, val, ',')) bossSeenDrake_ = (val == "1");
             else bossSeenDrake_ = false;
+            // Act 3 / endgame (backward compatible)
+            if (std::getline(ss_sub, val, ',')) questAct3Complete_ = (val == "1");
+            else questAct3Complete_ = false;
+            if (std::getline(ss_sub, val, ',')) questAct3SealFound_ = (val == "1");
+            else questAct3SealFound_ = false;
+            if (std::getline(ss_sub, val, ',')) bossSeenHollow_ = (val == "1");
+            else bossSeenHollow_ = false;
+            if (std::getline(ss_sub, val, ',')) bossSeenHydra_ = (val == "1");
+            else bossSeenHydra_ = false;
+            if (std::getline(ss_sub, val, ',')) bossSeenNightfang_ = (val == "1");
+            else bossSeenNightfang_ = false;
         }
     }
 

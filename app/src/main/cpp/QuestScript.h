@@ -8,7 +8,8 @@ namespace dnd {
 /**
  * Solo story acts — original wording only.
  * Act 1 "Ashen Lantern" (beats 1–6). Act 2 "Millhollow's Debt" (beats 8–13).
- * POST_QUEST (7) = procedural rooms (legacy post–Act 1 saves + after Act 2).
+ * Act 3 "Emberdeep Breach" (beats 14–19).
+ * POST_QUEST (7) = procedural rooms after full story (or legacy mid-save).
  * Compatible with 5e SRD monster/rule concepts only. Not an official D&D product.
  */
 enum class SoloQuestBeat : int {
@@ -20,14 +21,21 @@ enum class SoloQuestBeat : int {
     BONE_GALLERY = 4,
     LANTERN_VAULT = 5,
     RESOLUTION = 6,    // Ashen Shrine
-    POST_QUEST = 7,    // Procedural (legacy + after Act 2)
+    POST_QUEST = 7,    // Procedural after full story (legacy + post–Act 3)
     // Act 2 — Millhollow's Debt
-    ACT2_GREEN = 8,    // Debt collectors on the green
-    ACT2_WEIR = 9,     // Millrace / weir path
-    ACT2_CELLAR = 10,  // Flooded mill cellar
-    ACT2_LOFT = 11,    // Ledger loft (search)
-    ACT2_HALL = 12,    // Confront the Collector
-    ACT2_SETTLED = 13  // Debt settled / resolution
+    ACT2_GREEN = 8,
+    ACT2_WEIR = 9,
+    ACT2_CELLAR = 10,
+    ACT2_LOFT = 11,
+    ACT2_HALL = 12,
+    ACT2_SETTLED = 13,
+    // Act 3 — Emberdeep Breach
+    ACT3_RUMOR = 14,   // Rumors by the old well
+    ACT3_WELL = 15,    // Descent into the well
+    ACT3_ROOTS = 16,   // Root labyrinth
+    ACT3_RELIC = 17,   // Search for Ember Seal
+    ACT3_WARDEN = 18,  // Breach Warden fight
+    ACT3_SEALED = 19   // Breach sealed / resolution
 };
 
 enum class Difficulty : int {
@@ -39,7 +47,8 @@ enum class Difficulty : int {
 
 enum class SoloPlayMode : int {
     STORY = 0,
-    CRAWL = 1
+    CRAWL = 1,
+    RAID = 2
 };
 
 inline const char* difficultyName(int d) {
@@ -67,12 +76,20 @@ inline const char* soloQuestBeatName(int beat) {
         case SoloQuestBeat::ACT2_LOFT: return "Ledger Loft";
         case SoloQuestBeat::ACT2_HALL: return "Collector's Hall";
         case SoloQuestBeat::ACT2_SETTLED: return "Debt Settled";
+        case SoloQuestBeat::ACT3_RUMOR: return "Wellside Rumor";
+        case SoloQuestBeat::ACT3_WELL: return "Old Well Descent";
+        case SoloQuestBeat::ACT3_ROOTS: return "Root Labyrinth";
+        case SoloQuestBeat::ACT3_RELIC: return "Ember Seal Niche";
+        case SoloQuestBeat::ACT3_WARDEN: return "Breach Threshold";
+        case SoloQuestBeat::ACT3_SEALED: return "Breach Sealed";
         default: return "Wander";
     }
 }
 
 inline const char* soloQuestActTitle(int beat) {
     const auto b = static_cast<SoloQuestBeat>(beat);
+    if (b >= SoloQuestBeat::ACT3_RUMOR && b <= SoloQuestBeat::ACT3_SEALED)
+        return "Emberdeep Breach";
     if (b >= SoloQuestBeat::ACT2_GREEN && b <= SoloQuestBeat::ACT2_SETTLED)
         return "Millhollow's Debt";
     if (b >= SoloQuestBeat::MILLHOLLOW && b <= SoloQuestBeat::RESOLUTION)
@@ -90,12 +107,21 @@ inline bool isAct2Beat(int beat) {
         && beat <= static_cast<int>(SoloQuestBeat::ACT2_SETTLED);
 }
 
-inline bool isScriptedSoloBeat(int beat) {
-    return isAct1Beat(beat) || isAct2Beat(beat);
+inline bool isAct3Beat(int beat) {
+    return beat >= static_cast<int>(SoloQuestBeat::ACT3_RUMOR)
+        && beat <= static_cast<int>(SoloQuestBeat::ACT3_SEALED);
 }
 
-/** Previous scripted beat for wipe rollback (Act 2 first rolls back to Act 1 shrine). */
+inline bool isScriptedSoloBeat(int beat) {
+    return isAct1Beat(beat) || isAct2Beat(beat) || isAct3Beat(beat);
+}
+
+/** Previous scripted beat for wipe rollback. */
 inline int previousScriptedBeat(int beat) {
+    if (beat == static_cast<int>(SoloQuestBeat::ACT3_RUMOR))
+        return static_cast<int>(SoloQuestBeat::ACT2_SETTLED);
+    if (isAct3Beat(beat) && beat > static_cast<int>(SoloQuestBeat::ACT3_RUMOR))
+        return beat - 1;
     if (beat == static_cast<int>(SoloQuestBeat::ACT2_GREEN))
         return static_cast<int>(SoloQuestBeat::RESOLUTION);
     if (isAct2Beat(beat) && beat > static_cast<int>(SoloQuestBeat::ACT2_GREEN))
@@ -168,7 +194,7 @@ inline const QuestBeatScript kAshenLanternBeats[] = {
     }
 };
 
-// Act 2 — Millhollow's Debt (beat IDs 8–13). Original plot; SRD foes only (goblin, bandit-flavored fighter, etc.).
+// Act 2 — Millhollow's Debt (beat IDs 8–13). Original plot; SRD foes only.
 inline const QuestBeatScript kMillhollowDebtBeats[] = {
     {
         8,
@@ -216,9 +242,61 @@ inline const QuestBeatScript kMillhollowDebtBeats[] = {
         13,
         "Debt Settled",
         "Millhollow's elders gather on the green. The coerced ledger burns in a clay bowl; ash drifts like snow. "
-        "The false seal is broken. You may Rest, return to the menu, or press Onward into uncharted rooms.",
-        "Millhollow's Debt is settled. The collectors scatter. Rest if you need — or Onward for procedural rooms.",
+        "The false seal is broken. Rest if you need — then Onward: a colder threat waits by the old well.",
+        "Millhollow's Debt is settled. The collectors scatter. Rest — then Onward for Act 3: Emberdeep Breach.",
         "Millhollow's Debt complete — coerced ledger destroyed; false seal broken."
+    }
+};
+
+// Act 3 — Emberdeep Breach (beat IDs 14–19). Original plot; SRD-flavored foes only.
+inline const QuestBeatScript kEmberdeepBreachBeats[] = {
+    {
+        14,
+        "Wellside Rumor",
+        "By Millhollow's old well, ash and warm steam rise from cracked stone. Villagers whisper of a glow under the water — "
+        "and of bones that crawl up the rope at night. A child points to fresh claw marks on the curb.",
+        "Act 3 — Emberdeep Breach. Something under the village drinks lantern-light. "
+        "Descend the well; find the Ember Seal; close the breach before Millhollow sinks into emberdark.",
+        "Rumors of a glowing breach gather at Millhollow's old well."
+    },
+    {
+        15,
+        "Old Well Descent",
+        "The well shaft opens into a damp gallery of roots and brick. Ember-orange veins pulse in the stone. "
+        "Wet footprints spiral downward — not all of them human.",
+        "The descent is watched. Clear the scavengers before the roots claim you.",
+        "The party descended the old well into ember-veined tunnels."
+    },
+    {
+        16,
+        "Root Labyrinth",
+        "A maze of living roots and collapsed crypt niches. Pale fungi light the way; somewhere ahead, stone groans like a waking gate.",
+        "The labyrinth twists. Undead cling to the roots — keep together.",
+        "The party entered the Root Labyrinth beneath Millhollow."
+    },
+    {
+        17,
+        "Ember Seal Niche",
+        "A quiet niche cut into warm stone. An iron disc — the Ember Seal — rests in a soot-black socket, still faintly hot. "
+        "No foes here unless you leave without it and return later.",
+        "Search for the Ember Seal. Soft open — claim the seal, then press Onward to the breach.",
+        "The party reached the Ember Seal Niche."
+    },
+    {
+        18,
+        "Breach Threshold",
+        "A cracked arch frames a vertical wound of ember-light. Heat warps the air. The Breach Warden — a hulking ash-and-bone sentinel — "
+        "bars the threshold with a cracked iron polearm.",
+        "The Breach Warden will not yield. Defeat it, then seal the wound with the Ember Seal.",
+        "The party faced the Breach Warden at the ember threshold."
+    },
+    {
+        19,
+        "Breach Sealed",
+        "The Ember Seal locks into the arch. Ember-light dies to a dull coal. Cool air returns to Millhollow's well. "
+        "You may Rest, return to the menu, or press Onward into deep endgame rooms and Boss Raids.",
+        "Emberdeep Breach is sealed. Story complete — endgame crawl bosses, Legendary gear, and Boss Raids unlock.",
+        "Emberdeep Breach complete — Ember Seal set; Millhollow's undercroft quiet again."
     }
 };
 
@@ -227,6 +305,9 @@ inline const QuestBeatScript* findQuestBeat(int beatId) {
         if (b.beatId == beatId) return &b;
     }
     for (const auto& b : kMillhollowDebtBeats) {
+        if (b.beatId == beatId) return &b;
+    }
+    for (const auto& b : kEmberdeepBreachBeats) {
         if (b.beatId == beatId) return &b;
     }
     return nullptr;

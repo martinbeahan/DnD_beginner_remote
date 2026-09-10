@@ -389,6 +389,18 @@ Java_com_fintrack_dndbeginnerremote_MainActivity_getSoloPlayMode(JNIEnv *env, jo
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_isStoryFullyComplete(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.isStoryFullyComplete() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fintrack_dndbeginnerremote_MainActivity_consumePendingRaidKeyDrop(JNIEnv *env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_RendererMutex);
+    return g_Game.consumePendingRaidKeyDrop() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_fintrack_dndbeginnerremote_MainActivity_recoverFromPartyWipe(JNIEnv *env, jobject thiz) {
     std::lock_guard<std::mutex> lock(g_RendererMutex);
     return g_Game.recoverFromPartyWipe() ? JNI_TRUE : JNI_FALSE;

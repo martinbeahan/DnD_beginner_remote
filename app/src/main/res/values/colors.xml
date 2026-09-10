@@ -29,4 +29,5 @@
     <color name="rarity_uncommon">#FF4CAF50</color>
     <color name="rarity_rare">#FF42A5F5</color>
     <color name="rarity_epic">#FFAB47BC</color>
+    <color name="rarity_legendary">#FFFFB300</color>
 </resources>
