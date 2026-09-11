@@ -29,6 +29,7 @@ void Game::startNewGame(CharacterClass selectedClass, const std::string& playerN
     shopInventory_.clear();
     pendingBossXpBonus_ = 0;
     pendingBossLootLuck_ = 0;
+    pendingBossAllowLegendary_ = false;
     pendingBossGoldBonus_ = 0;
     bossSeenGk_ = false;
     bossSeenSk_ = false;
@@ -1409,10 +1410,12 @@ void Game::noteBossDefeat(const std::string& foeName) {
     int xp = 40 * tier + roomCount_ * 2;
     int luck = 10 + tier * 8;
     int gold = 20 * tier + getRandomInt(5, 15);
-    if (LootSystem::isEndgameBossName(foeName) || isBossRaid()) {
+    const bool endgameBossLoot = LootSystem::isEndgameBossName(foeName) || isBossRaid();
+    if (endgameBossLoot) {
         xp += 80;
-        luck += 18; // still modest; Legendary needs endgameUnlocked + rarityRoll
+        luck += 18; // XP/gold/luck bump only; Legendary gated by allowLegendary flag
         gold += 40;
+        pendingBossAllowLegendary_ = true;
     }
     pendingBossXpBonus_ += xp;
     pendingBossLootLuck_ += luck;
@@ -1555,6 +1558,7 @@ bool Game::beginBossRaidFromCurrent() {
     pendingRaidKeyDrop_ = false;
     pendingBossXpBonus_ = 0;
     pendingBossLootLuck_ = 0;
+    pendingBossAllowLegendary_ = false;
     pendingBossGoldBonus_ = 0;
 
     // Endgame gates active for this encounter (story must already be complete at menu).
@@ -1686,21 +1690,24 @@ void Game::enterClearedRoom(Character* actor) {
     dmSay("The party gains " + std::to_string(xpGained) + " XP.");
     int luck = pendingBossLootLuck_;
     pendingBossLootLuck_ = 0;
+    // Capture before lantern / early-return paths discard the pending flag.
+    const bool pendingAllowLegendary = pendingBossAllowLegendary_;
+    pendingBossAllowLegendary_ = false;
     if (static_cast<SoloQuestBeat>(questBeat_) == SoloQuestBeat::LANTERN_VAULT) {
         grantAshenLantern(actor);
     } else if (actor && !actor->isDead) {
         int preferA = -1, preferB = -1;
         partyPreferClasses(preferA, preferB);
-        const bool eg = endgameContentAllowed();
-        auto loot = LootSystem::generateLoot(roomCount_, luck, preferA, preferB, eg);
+        // Legendary only from endgame boss / Boss Raid defeat (never questAct3 alone).
+        auto loot = LootSystem::generateLoot(roomCount_, luck, preferA, preferB, pendingAllowLegendary);
         if (loot) {
             actor->addToInventory(loot);
             dmSay(actor->name + " finds " + loot->getDescription() + " [" + loot->rarityLabel() + "] — check Inventory.");
             addJournalEntry(actor->name + " found loot: " + loot->getDescription() + " (" + loot->rarityLabel() + ")");
         } else if (luck > 0) {
-            // #46 pity: guarantee a drop without luck=80 Epic flood.
-            auto pity = LootSystem::generateLoot(roomCount_, 30, preferA, preferB, eg);
-            if (!pity) pity = LootSystem::generateLoot(roomCount_, 60, preferA, preferB, eg);
+            // #46 pity: guarantee a drop; hard-cap at Epic (never Legendary).
+            auto pity = LootSystem::generateLoot(roomCount_, 30, preferA, preferB, false);
+            if (!pity) pity = LootSystem::generateLoot(roomCount_, 60, preferA, preferB, false);
             if (pity) {
                 actor->addToInventory(pity);
                 dmSay(actor->name + " claims a boss trophy: " + pity->getDescription() + " [" + pity->rarityLabel() + "].");
@@ -2743,6 +2750,7 @@ void Game::deserialize(const std::string& data) {
     currentTurnIndex_ = 0;
     pendingBossXpBonus_ = 0;
     pendingBossLootLuck_ = 0;
+    pendingBossAllowLegendary_ = false;
     pendingBossGoldBonus_ = 0;
     bossSeenGk_ = false;
     bossSeenSk_ = false;
