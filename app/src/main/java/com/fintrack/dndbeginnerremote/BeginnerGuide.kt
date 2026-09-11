@@ -12,7 +12,7 @@ object BeginnerGuide {
     val tutorialPages = listOf(
         Page(
             "Welcome, adventurer",
-            "This is a simple D&D-style dungeon crawl.\n\n" +
+            "This is a simple tabletop fantasy dungeon crawl, compatible with 5e SRD concepts.\n\n" +
                 "You play a hero. The Dungeon Master (DM) describes the world, " +
                 "runs monsters, and helps you learn the buttons.\n\n" +
                 "You do not need to know the rulebooks to start."
@@ -57,7 +57,7 @@ object BeginnerGuide {
                 "Pick Difficulty on the main menu (default Easy). On a full party wipe:\n" +
                 "Easy/Medium keep gear; Hard strips gold/gear; Nightmare ends the run.\n\n" +
                 "Continue mid-quest works — your beat is saved.\n" +
-                "Compatible with 5e SRD concepts only (not an official D&D product)."
+                "Compatible with 5e SRD concepts only. Not affiliated with, sponsored by, endorsed by, or approved by Wizards of the Coast LLC."
         )
     )
 
