@@ -663,12 +663,13 @@ public:
      * luckBonus: 0 normal; bosses add mild luck (see noteBossDefeat).
      * Drop chance and rarity use separate rolls (#46 hotfix): trash stays nerfed;
      * bosses better than trash but not BiS-guaranteed.
-     * endgameUnlocked: Acts 1–3 complete — required for Legendary.
+     * allowLegendary: true ONLY for endgame boss / Boss Raid defeat loot.
+     *   Never from trash, Search, shop, early GK/SK/Ashen Drake, or pity.
      * preferClass / preferClass2: party class tags (-1 = unused).
      */
     static std::shared_ptr<Item> generateLoot(int roomDepth, int luckBonus = 0,
                                               int preferClass = -1, int preferClass2 = -1,
-                                              bool endgameUnlocked = false) {
+                                              bool allowLegendary = false) {
         // Drop gate (shared luck) — ~42% item on luck=0
         int dropRoll = (rand() % 100) + luckBonus;
         if (dropRoll < 58) return nullptr;
@@ -676,10 +677,8 @@ public:
         // Rarity: luck only adds luckBonus/3 so bosses stay better than trash, not BiS flood.
         int rarityRoll = (rand() % 100) + (luckBonus / 3);
         ItemRarity rarity = ItemRarity::COMMON;
-        // Legendary: endgame + strong luck only (deep boss / raid)
-        if (endgameUnlocked && luckBonus >= 28 && rarityRoll >= 104) {
-            rarity = ItemRarity::LEGENDARY;
-        } else if (endgameUnlocked && luckBonus >= 40 && rarityRoll >= 99) {
+        // Legendary: explicit allow + flat 7% of successful drops (single-digit; not luck-flooded).
+        if (allowLegendary && (rand() % 100) < 7) {
             rarity = ItemRarity::LEGENDARY;
         } else if (rarityRoll >= 98) {
             rarity = ItemRarity::EPIC;       // #46: was shared-roll >=95
@@ -688,7 +687,7 @@ public:
         } else if (rarityRoll >= 70) {
             rarity = ItemRarity::UNCOMMON;  // #46: was >=68
         }
-        if (!endgameUnlocked && rarity == ItemRarity::LEGENDARY) {
+        if (!allowLegendary && rarity == ItemRarity::LEGENDARY) {
             rarity = ItemRarity::EPIC;
         }
 

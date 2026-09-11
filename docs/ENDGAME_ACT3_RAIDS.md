@@ -1,4 +1,4 @@
-# Endgame / Act 3 / Boss Raids — v2.6.3 (versionCode 40)
+# Endgame / Act 3 / Boss Raids — v2.6.4 (versionCode 41)
 
 **Base:** master after Text.DnD (#45); incorporates #46 drop-nerf weights (separate drop/rarity rolls; shop Rare/Epic gated deeper). **Legal:** original Act 3 / raid / endgame boss names & flavor; SRD-safe monsters only; no WotC module text. No new art assets (reuse existing CC0 stages/sprites — see `ATTRIBUTION.md`).
 
@@ -9,7 +9,7 @@
 | Content | Gate |
 |---|---|
 | Boss Raid menu | `story_fully_complete` (SharedPreferences) / `questAct3Complete_` — locked shows **Finish the story first** |
-| Legendary loot | `endgameContentAllowed()` = Act 3 complete (or active Boss Raid run) |
+| Legendary loot | `allowLegendary` on `generateLoot` — **only** Hollow Crown / Ember Hydra / Nightfang / Boss Raid defeat (not Act 3 flag alone; never pity/Search/shop/early bosses) |
 | Hollow Crown / Ember Hydra / Nightfang Matriarch | Same endgame gate + deep crawl room (~18–22+) |
 | Early crawl GK / SK / Drake | Unchanged — may appear before story complete |
 
@@ -25,7 +25,7 @@ Acts 1+2 unchanged; after Act 2 Settled, Onward starts Act 3 (not procedural). A
 
 - Early/normal drops keep **#46 nerfed** Rare/Epic weights (separate rarity roll; luck/3).
 - **Epic** mostly deep / boss luck.
-- **Legendary** (gold UI): story-complete + boss/deep luck only. Never in shop.
+- **Legendary** (gold UI): **7%** of successful drops from endgame boss / Boss Raid defeat only (`allowLegendary`). Never from trash, Search, shop, early GK/SK/Ashen Drake, generic clears, or pity (pity hard-capped at Epic).
 - Legendary power: +1 bonus stat; upgrade **15** → two; upgrade **20+** → three + sub-effect (lifesteal / on-hit heal / once-per-fight shield). Caps: Common 5 … Legendary 25.
 
 ## 3) Boss Raid
@@ -54,7 +54,7 @@ Act 3 flags + endgame boss-seen in serialize; inventory Legendary token fields; 
 
 ## Device checklist
 
-1. Story through Act 3 → menu unlocks Boss Raid; Legendary possible on endgame bosses.
+1. Story through Act 3 → menu unlocks Boss Raid; Legendary (~7%) only on Hollow/Hydra/Nightfang or Raid clears — not on post-story trash/early bosses.
 2. Before Act 3: Raid locked; no Legendary; no Hollow/Hydra/Nightfang.
 3. Raid keys: spend/grant caps; UI explains.
 4. Inventory shows Legendary color + bonus/sub-effect text; upgrade to 20+ unlocks sub-effect.

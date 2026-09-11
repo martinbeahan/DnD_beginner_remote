@@ -185,6 +185,8 @@ private:
     std::vector<std::shared_ptr<Item>> shopInventory_;
     int pendingBossXpBonus_ = 0;
     int pendingBossLootLuck_ = 0;
+    /** Set by noteBossDefeat for Hollow Crown / Ember Hydra / Nightfang / Boss Raid only. */
+    bool pendingBossAllowLegendary_ = false;
     int pendingBossGoldBonus_ = 0;
     bool bossSeenGk_ = false;
     bool bossSeenSk_ = false;
