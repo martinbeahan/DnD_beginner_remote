@@ -12,7 +12,7 @@ Game::Game() : currentTurnIndex_(0), turnCounter_(0), roomCount_(0), gameOver_(f
     rng_.seed(rd());
 
     std::stringstream ss;
-    ss << "DND-" << std::hex << std::uppercase << getRandomInt(0, 0xFFFF);
+    ss << "AL-" << std::hex << std::uppercase << getRandomInt(0, 0xFFFF);
     sessionId_ = ss.str();
 
     startNewGame();

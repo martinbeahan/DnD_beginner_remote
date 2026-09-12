@@ -392,7 +392,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.topBar).setOnLongClickListener {
             val sid = getSessionId()
-            val clip = android.content.ClipData.newPlainText("DND_SESSION", sid)
+            val clip = android.content.ClipData.newPlainText("AL_SESSION", sid)
             (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
             Toast.makeText(this, "Session ID $sid Copied!", Toast.LENGTH_SHORT).show()
             true
@@ -1352,13 +1352,16 @@ class MainActivity : AppCompatActivity() {
         }
         settingsAboutText.text =
             getString(R.string.app_name) + "\nversion " + verName + " (" + verCode + ")" +
-                "\n\nCompatible with 5e SRD (SRD 5.1, CC-BY 4.0). Not an official D&D product. " +
-                "See ATTRIBUTION.md.\n\nArt (CC0): LuizMelo idle/attack frames (crisper v2.5); " +
-                "Nidhoggn battlebacks (higher-quality stages + boss room); ansimuz Phantasy dungeon; " +
-                "quantumelle Dark forest path; Clint Bellanger Tiny Creatures (ogre).\n\nAudio (CC0): " +
-                "Ironchest Dungeon Loops (explore + tension BGM); StarNinjas sword/clash SFX; " +
-                "Darsycho monster snarl; bart interface beep. DM voice uses on-device Text-to-Speech " +
-                "(no third-party voices)."
+                "\n\nAshen Lantern is not affiliated with, sponsored by, endorsed by, or approved by " +
+                "Wizards of the Coast LLC. Dungeons & Dragons, D&D, and related marks are trademarks of " +
+                "Wizards of the Coast LLC.\n\n" +
+                "Compatible with 5e SRD concepts only (System Reference Document 5.1, " +
+                "Creative Commons Attribution 4.0 International).\n\n" +
+                "Full credits: ATTRIBUTION.md (repo / project docs).\n\n" +
+                "Art (CC0): LuizMelo idle/attack frames; Nidhoggn battlebacks; ansimuz Phantasy dungeon; " +
+                "quantumelle Dark forest path; Clint Bellanger Tiny Creatures.\n\n" +
+                "Audio (CC0): Ironchest Dungeon Loops; StarNinjas sword/clash SFX; Darsycho monster snarl; " +
+                "bart interface beep. DM voice uses on-device Text-to-Speech."
         settingsRoot.visibility = View.VISIBLE
         settingsRoot.bringToFront()
     }
@@ -1795,7 +1798,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showJoinDialog() {
-        val input = EditText(this).apply { hint = "Session ID (e.g. DND-A1B2)" }
+        val input = EditText(this).apply { hint = "Session ID (e.g. AL-A1B2)" }
         AlertDialog.Builder(this).setTitle("Join DM session").setView(input)
             .setPositiveButton("Join") { _, _ ->
                 val sid = input.text.toString().trim().uppercase()
@@ -1858,7 +1861,7 @@ class MainActivity : AppCompatActivity() {
             try { getSessionId() } catch (_: Exception) { "" }
         }
         if (sid.isBlank()) return
-        val clip = android.content.ClipData.newPlainText("DND_SESSION", sid)
+        val clip = android.content.ClipData.newPlainText("AL_SESSION", sid)
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
         AlertDialog.Builder(this)
             .setTitle("You are the DM")
@@ -3764,18 +3767,44 @@ class MainActivity : AppCompatActivity() {
     private fun prefs() = getPreferences(MODE_PRIVATE)
 
     private fun maybeOfferTutorialThenCoach() {
-        val seen = prefs().getBoolean("seen_beginner_tutorial", false)
-        if (!seen) {
-            showTutorial(0) {
-                prefs().edit().putBoolean("seen_beginner_tutorial", true).apply()
-                postCoach(
-                    "DM: Tutorial done. I'll coach you on your turns. Tap Help anytime. " +
-                        BeginnerGuide.specialBlurb(localClassId)
-                )
+        maybeShowLegalDisclaimer {
+            val seen = prefs().getBoolean("seen_beginner_tutorial", false)
+            if (!seen) {
+                showTutorial(0) {
+                    prefs().edit().putBoolean("seen_beginner_tutorial", true).apply()
+                    postCoach(
+                        "DM: Tutorial done. I'll coach you on your turns. Tap Help anytime. " +
+                            BeginnerGuide.specialBlurb(localClassId)
+                    )
+                }
+            } else {
+                postCoach("DM: Welcome back. Tap Help if you forget what a button does.")
             }
-        } else {
-            postCoach("DM: Welcome back. Tap Help if you forget what a button does.")
         }
+    }
+
+    /** One-time legal / trademark notice before the beginner tutorial (or for returning players who never saw it). */
+    private fun maybeShowLegalDisclaimer(onContinue: () -> Unit) {
+        if (prefs().getBoolean("seen_legal_disclaimer", false)) {
+            onContinue()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Legal notice")
+            .setMessage(
+                "Ashen Lantern is an independent tabletop fantasy adventure.\n\n" +
+                    "It is not affiliated with, sponsored by, endorsed by, or approved by " +
+                    "Wizards of the Coast LLC. Dungeons & Dragons, D&D, and related marks are " +
+                    "trademarks of Wizards of the Coast LLC.\n\n" +
+                    "Game rules are compatible with 5e SRD concepts only (SRD 5.1, CC-BY 4.0). " +
+                    "See Settings → About and ATTRIBUTION.md for full credits."
+            )
+            .setCancelable(false)
+            .setPositiveButton("Continue") { _, _ ->
+                prefs().edit().putBoolean("seen_legal_disclaimer", true).apply()
+                onContinue()
+            }
+            .show()
     }
 
     private fun showHelpMenu() {

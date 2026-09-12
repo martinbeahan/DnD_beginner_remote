@@ -1,3 +1,24 @@
+# Attribution & legal
+
+## Legal / trademarks
+
+**Ashen Lantern** is an independent tabletop fantasy adventure app by Martin Beahan.
+
+This app is **not affiliated with, sponsored by, endorsed by, or approved by** Wizards of the Coast LLC.
+
+**Dungeons & Dragons**, **D&D**, and related marks are trademarks of Wizards of the Coast LLC.
+
+Game rules and class/monster concepts are **compatible with 5e SRD concepts only**, based on the
+**System Reference Document 5.1** (SRD 5.1), available under the
+[Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+Original adventure text (including Solo quests such as *Ashen Lantern*) is original and not copied from
+any Wizards of the Coast adventure module.
+
+Third-party art and audio remain under their own licenses (tables below). Application source code is
+MIT-licensed; see `LICENSE`.
+
+---
+
 # Audio attribution
 
 All game audio assets ship under **Creative Commons Zero (CC0 / public domain)**.
